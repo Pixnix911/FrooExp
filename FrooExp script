@@ -2,8 +2,8 @@
 // @name         FrooExp
 // @namespace    https://tampermonkey.net/
 // @version      1.1
-// @description  Port of Korone All‑in‑One for froot.club. Removed Old Trades Checker & Mass Trade Sender. Added Admin Panel for UID 111 and user "141".
-// @author       cooper, dior, pythonplugin, r7kano, x, rolu, arz (adapted for froot.club)
+// @description  Port of Korone All‑in‑One (frooExp) for froot.club. Removed Old Trades Checker & Mass Trade Sender.
+// @author       cooper, dior, pythonplugin, r7kano, x, rolu, arz, fluouliss (adapted for froot.club)
 // @match        *://*.froot.club/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
