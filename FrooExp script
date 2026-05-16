@@ -4,7 +4,7 @@
 // @version      1.0
 // @description  FrooExp – extension for froot.club
 // @author       fluouliss (patched for froot.club)
-// @match        *https://froot.club/*
+// @match        *://*.froot.club/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_notification
