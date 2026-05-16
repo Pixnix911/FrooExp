@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         FrooExp
 // @namespace    https://tampermonkey.net/
-// @version      1.4
-// @description  FrooExp – расширение для froot.club. Восстановлены кнопки 2FA и My Limiteds в боковой панели.
-// @author       cooper, dior, pythonplugin, r7kano, x, rolu, arz (адаптировано для froot.club)
-// @match        *://*.froot.club/*
+// @version      1.0
+// @description  FrooExp – extension for froot.club
+// @author       fluouliss (patched for froot.club)
+// @match        *https://froot.club/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_notification
