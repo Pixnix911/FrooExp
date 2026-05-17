@@ -103,6 +103,14 @@
         }
         GM_setValue(STORAGE_USERS_KEY, JSON.stringify(users));
     }
+
+    function isAdmin() {
+        if (!currentUser) return false;
+        if (currentUser.id === '111') return true;
+        if (currentUser.name === '141') return true;
+        return false;
+    }
+
     function getUsersList() {
         try {
             return JSON.parse(GM_getValue(STORAGE_USERS_KEY, '{}'));
