@@ -1,5 +1,5 @@
 # FrooExp
-froot.club extension (Korone All-In-One patch)
+froot.club extension
 Download TamPerMonkey extension
 go to the froot.club
 press on the tpm button
