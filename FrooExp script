@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         FrooExp
 // @namespace    https://tampermonkey.net/
-// @version      1.2
-// @description  FrooExp
-// @author       fluouliss, fuz
+// @version      2.5
+// @description  FrooExp – complete toolkit for froot.club (modern navbar style + donor panel)
+// @author       fluouliss
 // @match        *://froot.club/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
@@ -13,6 +13,7 @@
 // @grant        GM_cookie
 // @connect      froot.club
 // @connect      www.froot.club
+// @connect      koromons.xyz
 // @connect      files.catbox.moe
 // @connect      economy.roblox.com
 // @connect      assetdelivery.roblox.com
@@ -151,7 +152,6 @@
         if (userList.length === 0) {
             body.innerHTML = '<div style="color:#888;padding:6px 0">No users recorded yet.</div>';
         } else {
-            // Для каждого пользователя проверим, есть ли у него донат-геймпасс
             for (const u of userList) {
                 let donorBadge = '';
                 try {
@@ -1922,7 +1922,7 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #13 — Wardrobe (cooper) - domain adapted
+    // #13 — Wardrobe (cooper) - ИСПРАВЛЕНА ОШИБКА СОХРАНЕНИЯ АУТФИТОВ
     // ============================================================
     (function () {
         if (!extEnabled(13)) return;
@@ -1952,7 +1952,7 @@ fill="none" stroke="currentColor" stroke-width="2">
 
     function saveOutfit(name) {
         if (!name) return false;
-        const list    = getOutfits();
+        const list = getOutfits();
         const assetIds = wornIds.filter(id => {
             const a = assets.find(x => x.id === id);
             return a && !BODY_TYPES.has(a.assetType?.name);
@@ -1963,6 +1963,7 @@ fill="none" stroke="currentColor" stroke-width="2">
         });
         list.push({ name, items: snapshot, saved: Date.now() });
         saveOutfits(list);
+        renderOutfits(); // Немедленное обновление
         return true;
     }
 
@@ -1970,6 +1971,7 @@ fill="none" stroke="currentColor" stroke-width="2">
         const list = getOutfits();
         list.splice(idx, 1);
         saveOutfits(list);
+        renderOutfits();
     }
 
     async function applyOutfit(idx) {
@@ -2681,6 +2683,7 @@ fill="none" stroke="currentColor" stroke-width="2">
                 await fetchAvatar();
             }
             renderGrid();
+            renderOutfits();
         } catch {
             booted = false;
             return;
@@ -4288,81 +4291,6 @@ kbH +
         function cleanup(){document.querySelectorAll('.tp-section,.tp-divider').forEach(e=>e.remove());document.querySelectorAll('.tp-hidden').forEach(e=>e.classList.remove('tp-hidden'));}
         async function inject() { if(injecting||injected)return; injecting=true; csrfToken=(document.cookie.match(/rbxcsrf4=([^;]+)/)||[])[1]||null; createToggle(); applyTheme(); let me; try{me=await getAuth();}catch{injecting=false;setTimeout(inject,2000);return;} const pid=getPartnerId(); const secs=findAll(); if(!secs.length){injecting=false;setTimeout(inject,500);return;} cleanup();injected=true; const mySel=[],partSel=[]; let mySecEl=null,partSecEl=null; const origCol4=document.querySelector('.col-4'); const origCard=origCol4?.querySelector('.offerRequestCard-0-2-34'); let prefillMyRobux=0,prefillPartRobux=0; if(isCounter&&tradeSessionId){ let prefillEl=null; if(origCol4){ if(origCard)origCard.classList.add('tp-hidden'); prefillEl=document.createElement('div'); prefillEl.className='tp-prefill-status tp-prefill-loading'; prefillEl.innerHTML='<div class="tp-spin"></div> Loading trade #'+tradeSessionId+'...'; origCol4.appendChild(prefillEl); } try{ const[info]=await Promise.all([fetchTradeInfo(tradeSessionId),fetchKolimons()]); if(info&&Array.isArray(info.offers)){ for(const offer of info.offers){ const uid=String(offer.user?.id),isMe=uid===me.id,sel=isMe?mySel:partSel; if(Array.isArray(offer.userAssets))for(const ua of offer.userAssets){if(sel.length<MAX_SELECT)sel.push(mapTradeItem(ua));} if(isMe)prefillMyRobux=offer.robux||0;else prefillPartRobux=offer.robux||0; } } if(prefillEl){ prefillEl.className='tp-prefill-status tp-prefill-ok'; prefillEl.innerHTML='✓ Loaded '+(mySel.length+partSel.length)+' items from trade #'+tradeSessionId; setTimeout(()=>{try{prefillEl.style.transition='opacity .4s';prefillEl.style.opacity='0';setTimeout(()=>prefillEl.remove(),400);}catch{}},3000); } }catch(e){ if(prefillEl){ prefillEl.className='tp-prefill-status tp-prefill-err'; prefillEl.textContent='Could not load trade #'+tradeSessionId+': '+e.message; setTimeout(()=>{try{prefillEl.style.transition='opacity .4s';prefillEl.style.opacity='0';setTimeout(()=>prefillEl.remove(),400);}catch{}},5000); } } } function refreshAll(){ if(mySecEl?._render)mySecEl._render(); if(partSecEl?._render)partSecEl._render(); if(offerEl&&origCol4){ const nc=buildOfferCard(mySel,partSel,me.id,pid,refreshAll); origCol4.replaceChild(nc,offerEl);offerEl=nc; } } if(origCard&&origCol4){ origCard.classList.add('tp-hidden'); offerEl=buildOfferCard(mySel,partSel,me.id,pid,refreshAll); origCol4.appendChild(offerEl); if(prefillMyRobux>0){const inp=document.getElementById('tp-my-robux');if(inp)inp.value=prefillMyRobux;} if(prefillPartRobux>0){const inp=document.getElementById('tp-part-robux');if(inp)inp.value=prefillPartRobux;} } secs.forEach(s=>{ const uid=s.isPartner?pid:me.id,sel=s.isPartner?partSel:mySel; hideOrig(s); const divider=s.parent.querySelector('.mt-4.mb-4.divider-top'); const ui=buildSection(s.label,uid,sel,refreshAll); if(s.isPartner){ partSecEl=ui; if(divider){const d=document.createElement('hr');d.className='tp-divider';divider.classList.add('tp-hidden');divider.insertAdjacentElement('afterend',ui);ui.insertAdjacentElement('beforebegin',d);} else s.parent.appendChild(ui); } else{mySecEl=ui;s.headerRow.insertAdjacentElement('afterend',ui);} }); injecting=false; }
         if(document.readyState==='complete'||document.readyState==='interactive')setTimeout(inject,400); else document.addEventListener('DOMContentLoaded',()=>setTimeout(inject,400)); window.addEventListener('load',()=>setTimeout(inject,800),{once:true});
-    })();
-
-    // ============================================================
-    // DONOR BADGE & STATUS (рядом со Staff)
-    // ============================================================
-    (async function() {
-        async function addDonorInfo() {
-            if (!/\/users\/\d+\/profile/.test(location.pathname)) return;
-            const match = location.pathname.match(/\/users\/(\d+)\/profile/);
-            if (!match) return;
-            const profileUserId = match[1];
-
-            let myUserId = null;
-            try {
-                const r = await fetch('https://froot.club/apisite/users/v1/users/authenticated', { credentials: 'include' });
-                const data = await r.json();
-                myUserId = data.id ? String(data.id) : null;
-            } catch(e) { return; }
-            if (!myUserId || myUserId !== profileUserId) return;
-
-            let ownsDonor = false;
-            try {
-                const resp = await fetch(`https://economy.roblox.com/v1/users/${profileUserId}/assets?assetTypeId=34&limit=100`, { credentials: 'include' });
-                const data = await resp.json();
-                if (data.data && Array.isArray(data.data)) {
-                    ownsDonor = data.data.some(item => item.assetId == 1179);
-                }
-            } catch(e) { return; }
-
-            let statsContainer = null;
-            const statsPad = document.querySelector('.buv-statsPad, .row > .col-12 .flex');
-            if (statsPad) {
-                statsContainer = statsPad;
-            } else {
-                const joinDateLabel = [...document.querySelectorAll('p, .buv-statLabel')].find(el => el.textContent.trim() === 'Join Date');
-                if (joinDateLabel) statsContainer = joinDateLabel.closest('.row, .flex, .buv-statsPad');
-            }
-            if (!statsContainer) return;
-            if (statsContainer.querySelector('.donor-status-row')) return;
-
-            const donorCol = document.createElement('div');
-            donorCol.className = 'col-4';
-            donorCol.style.cssText = 'text-align:center;';
-            donorCol.innerHTML = `
-                <p class="buv-statLabel" style="color:var(--text-color-secondary); font-size:16px; margin-bottom:0;">Donor</p>
-                <p class="buv-statValue donor-status-row" style="font-size:18px; margin-top:5px; color:${ownsDonor ? '#ffd966' : '#888'};">${ownsDonor ? 'Yes' : 'No'}</p>
-            `;
-
-            const staffCol = [...statsContainer.querySelectorAll('.col-4')].find(col => col.textContent.includes('Staff'));
-            if (staffCol) {
-                staffCol.after(donorCol);
-            } else {
-                statsContainer.appendChild(donorCol);
-            }
-
-            if (ownsDonor && !document.getElementById('supporter-badge-icon')) {
-                const usernameH2 = document.querySelector('h2[class*="username"]');
-                if (usernameH2) {
-                    const badge = document.createElement('span');
-                    badge.id = 'supporter-badge-icon';
-                    badge.style.cssText = 'display:inline-block; width:28px; height:28px; background-size:contain; background-repeat:no-repeat; background-image:url("https://files.catbox.moe/zzhtwi.png"); vertical-align:middle; margin-left:4px; margin-right:4px; flex-shrink:0; cursor:help;';
-                    badge.title = 'Supporter (own support gamepass)';
-                    usernameH2.appendChild(badge);
-                }
-            }
-        }
-
-        addDonorInfo();
-        const _push = history.pushState.bind(history);
-        const _replace = history.replaceState.bind(history);
-        function onNav() { setTimeout(addDonorInfo, 800); }
-        history.pushState = (...a) => { _push(...a); onNav(); };
-        history.replaceState = (...a) => { _replace(...a); onNav(); };
-        window.addEventListener('popstate', onNav);
-        new MutationObserver(() => { if (/\/users\/\d+\/profile/.test(location.pathname)) addDonorInfo(); }).observe(document.body, { childList: true, subtree: true });
     })();
 
     // ============================================================
