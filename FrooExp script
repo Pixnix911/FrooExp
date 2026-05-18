@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FrooExp
 // @namespace    https://tampermonkey.net/
-// @version      2.5
+// @version      1.3
 // @description  FrooExp – complete toolkit for froot.club (modern navbar style + donor panel)
 // @author       fluouliss
 // @match        *://froot.club/*
