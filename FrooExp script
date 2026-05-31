@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         FrooExp
 // @namespace    https://tampermonkey.net/
-// @version      1.3
-// @description  FrooExp – complete toolkit for froot.club (modern navbar style + donor panel)
+// @version      3.1
+// @description  FrooExp – complete toolkit for froot.club (modern navbar style + donor panel + trade price check + whitelist/blacklist + trading lounge)
 // @author       fluouliss
 // @match        *://froot.club/*
 // @grant        GM_xmlhttpRequest
@@ -20,6 +20,12 @@
 // @connect      roblox.com
 // @connect      rbxcdn.com
 // @connect      akamaized.net
+// @connect      firebase.googleapis.com
+// @connect      firebaseio.com
+// @connect      tradelounge-13f55.firebaseio.com
+// @connect      firestore.googleapis.com
+// @connect      tradelounge-13f55.firebaseio.com
+// @connect      ipapi.co
 // @connect      *
 // @require      https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js
 // @run-at       document-idle
@@ -54,6 +60,15 @@
         21: 'Trade Calculator',
         22: '2018 Users Search',
         23: 'Trade+',
+        24: 'Trade Price Check',
+        25: 'Whitelist/Blacklist',
+        26: 'Trading Lounge',
+        27: 'Auto Buyer',
+        28: 'Username History',
+        29: 'Custom Trade Sound',
+        30: 'Owned Highlighter',
+        31: 'Discount Display',
+        32: 'PIN Protection'
     };
 
     function extEnabled(n) {
@@ -180,6 +195,367 @@
     }
 
     // ============================================================
+    // WHITELIST / BLACKLIST SHARED MODULE
+    // ============================================================
+    const STORAGE_BLACKLIST = 'frooexp_blacklist';
+    const STORAGE_WHITELIST = 'frooexp_whitelist';
+
+    let blacklist = new Set();   // user IDs as strings
+    let whitelist = new Set();
+
+    function loadBlackWhitelist() {
+        try {
+            const bl = JSON.parse(GM_getValue(STORAGE_BLACKLIST, '[]'));
+            blacklist = new Set(bl);
+            const wl = JSON.parse(GM_getValue(STORAGE_WHITELIST, '[]'));
+            whitelist = new Set(wl);
+        } catch(e) { console.error(e); }
+    }
+    function saveBlackWhitelist() {
+        GM_setValue(STORAGE_BLACKLIST, JSON.stringify([...blacklist]));
+        GM_setValue(STORAGE_WHITELIST, JSON.stringify([...whitelist]));
+    }
+    function isBlacklisted(uid) { return blacklist.has(String(uid)); }
+    function isWhitelisted(uid) { return whitelist.has(String(uid)); }
+    function addToBlacklist(uid) { blacklist.add(String(uid)); saveBlackWhitelist(); }
+    function removeFromBlacklist(uid) { blacklist.delete(String(uid)); saveBlackWhitelist(); }
+    function addToWhitelist(uid) { whitelist.add(String(uid)); saveBlackWhitelist(); }
+    function removeFromWhitelist(uid) { whitelist.delete(String(uid)); saveBlackWhitelist(); }
+    function exportLists() {
+        return JSON.stringify({
+            blacklist: [...blacklist],
+            whitelist: [...whitelist]
+        });
+    }
+    function importLists(jsonStr) {
+        try {
+            const data = JSON.parse(jsonStr);
+            if (data.blacklist) blacklist = new Set(data.blacklist);
+            if (data.whitelist) whitelist = new Set(data.whitelist);
+            saveBlackWhitelist();
+            return true;
+        } catch(e) { return false; }
+    }
+
+    // UI for managing whitelist/blacklist (will be added to extension panel)
+    async function buildWhitelistBlacklistPanelSection() {
+        const div = document.createElement('div');
+        div.className = 'korone-section-header';
+        div.style.cursor = 'default';
+        div.style.padding = '8px 14px';
+        div.style.background = 'rgba(0,0,0,0.02)';
+        div.innerHTML = `
+            <span class="korone-section-label" style="color:#4f8ef7;">Whitelist / Blacklist</span>
+            <span style="color:#888;font-size:10px;">${blacklist.size} blacklisted, ${whitelist.size} whitelisted</span>
+        `;
+        const body = document.createElement('div');
+        body.className = 'korone-section-body';
+        body.style.padding = '8px 14px';
+        body.style.fontSize = '12px';
+        body.innerHTML = `
+            <div style="margin-bottom:8px;">
+                <button id="korone-export-lists" style="background:#111;color:#fff;border:none;padding:4px 10px;margin-right:6px;cursor:pointer;">Export Lists</button>
+                <button id="korone-import-lists" style="background:#111;color:#fff;border:none;padding:4px 10px;cursor:pointer;">Import Lists</button>
+            </div>
+            <div style="margin-top:6px;font-size:11px;color:#888;">Blacklist: trades from these users will be hidden.<br>Whitelist: users will be highlighted in friends/search.</div>
+            <input type="file" id="korone-import-file" style="display:none;" accept=".json">
+        `;
+        const exportBtn = body.querySelector('#korone-export-lists');
+        const importBtn = body.querySelector('#korone-import-lists');
+        const fileInput = body.querySelector('#korone-import-file');
+
+        exportBtn.addEventListener('click', () => {
+            const data = exportLists();
+            const blob = new Blob([data], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `frooexp_lists_${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+        importBtn.addEventListener('click', () => {
+            fileInput.click();
+        });
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const json = ev.target.result;
+                if (importLists(json)) {
+                    alert('Lists imported successfully!');
+                    // refresh UI if needed
+                } else {
+                    alert('Invalid file format.');
+                }
+                fileInput.value = '';
+            };
+            reader.readAsText(file);
+        });
+        return { header: div, body: body };
+    }
+
+    // Apply whitelist highlighting in friends list and search results
+    function applyWhitelistHighlighting() {
+        if (!extEnabled(25)) return;
+        // Friends list cards (Better My Friends uses custom cards, but also original site)
+        document.querySelectorAll('.pk-card, .friendCard-0-2-118, [class*="friendCardWrapper"]').forEach(card => {
+            const uid = card.dataset.uid || card.getAttribute('data-userid') || (card.querySelector('a[href*="/users/"]')?.href.match(/\/users\/(\d+)/)?.[1]);
+            if (uid && isWhitelisted(uid)) {
+                card.style.border = '2px solid #4ade80';
+                card.style.boxShadow = '0 0 8px rgba(74,222,128,0.5)';
+            } else if (card.style.border === '2px solid #4ade80') {
+                card.style.border = '';
+                card.style.boxShadow = '';
+            }
+        });
+        // Search results (user search page)
+        document.querySelectorAll('.search-result .avatar-card, .user-search-result, [class*="userResult"]').forEach(card => {
+            const link = card.querySelector('a[href*="/users/"]');
+            if (link) {
+                const uid = link.href.match(/\/users\/(\d+)/)?.[1];
+                if (uid && isWhitelisted(uid)) {
+                    card.style.border = '2px solid #4ade80';
+                    card.style.backgroundColor = 'rgba(74,222,128,0.1)';
+                } else if (card.style.border === '2px solid #4ade80') {
+                    card.style.border = '';
+                    card.style.backgroundColor = '';
+                }
+            }
+        });
+    }
+
+    // Hide trades from blacklisted users in the "My Trades" page
+    function hideBlacklistedTrades() {
+        if (!extEnabled(25)) return;
+        if (!location.pathname.includes('/My/Trades')) return;
+        document.querySelectorAll('tr[class*="row-"]').forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 2) {
+                const partnerCell = cells[1];
+                const link = partnerCell.querySelector('a');
+                if (link) {
+                    const uid = link.href.match(/\/users\/(\d+)/)?.[1];
+                    if (uid && isBlacklisted(uid)) {
+                        row.style.display = 'none';
+                    } else {
+                        row.style.display = '';
+                    }
+                }
+            }
+        });
+    }
+
+    // Periodic apply of highlighting and hiding
+    setInterval(() => {
+        if (extEnabled(25)) {
+            applyWhitelistHighlighting();
+            hideBlacklistedTrades();
+        }
+    }, 2000);
+    // MutationObserver for dynamic content
+    new MutationObserver(() => {
+        if (extEnabled(25)) {
+            applyWhitelistHighlighting();
+            hideBlacklistedTrades();
+        }
+    }).observe(document.body, { childList: true, subtree: true });
+
+    // ============================================================
+    // TRADE PRICE CHECK & SCAM DETECTION (Feature #24)
+    // ============================================================
+    if (extEnabled(24)) {
+        (function() {
+            const KOROMONS_API = 'https://koromons.xyz/api/items';
+            let itemValues = {}; // assetId -> {value, rap, demand}
+            let valuesLoaded = false;
+            let loadingPromise = null;
+
+            function loadItemValues() {
+                if (loadingPromise) return loadingPromise;
+                loadingPromise = new Promise((resolve) => {
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url: KOROMONS_API,
+                        onload: (resp) => {
+                            try {
+                                const data = JSON.parse(resp.responseText);
+                                if (Array.isArray(data)) {
+                                    data.forEach(item => {
+                                        if (item.itemId) {
+                                            itemValues[item.itemId] = {
+                                                value: item.Value || 0,
+                                                rap: item.RAP || 0,
+                                                demand: (item.Demand || '').toLowerCase()
+                                            };
+                                        }
+                                    });
+                                }
+                                valuesLoaded = true;
+                                resolve();
+                            } catch(e) { resolve(); }
+                        },
+                        onerror: () => resolve()
+                    });
+                });
+                return loadingPromise;
+            }
+
+            function getItemValue(assetId) {
+                const v = itemValues[assetId];
+                return v ? { value: v.value, rap: v.rap } : { value: 0, rap: 0 };
+            }
+
+            // Watch for trade page and inject price indicators
+            function initTradePriceCheck() {
+                if (!location.pathname.startsWith('/Trade/')) return;
+                loadItemValues().then(() => {
+                    observeTradeOffers();
+                });
+            }
+
+            function observeTradeOffers() {
+                // The trade page has "Your Offer" and "Their Offer" sections
+                // We'll listen for changes in item slots (items added/removed)
+                const observer = new MutationObserver(() => {
+                    updateTradeTotals();
+                });
+                const container = document.querySelector('.col-8') || document.body;
+                observer.observe(container, { childList: true, subtree: true, attributes: true });
+                updateTradeTotals();
+            }
+
+            function updateTradeTotals() {
+                // Find offers: we look for items in offer cards
+                const myOfferItems = getOfferItems('Your Offer');
+                const theirOfferItems = getOfferItems('Their Offer');
+                const myTotal = computeTotal(myOfferItems);
+                const theirTotal = computeTotal(theirOfferItems);
+                displayTotals(myTotal, theirTotal);
+                checkScam(myTotal, theirTotal);
+                // Also add per-item price tags
+                addPriceTagsToOfferItems(myOfferItems, 'my');
+                addPriceTagsToOfferItems(theirOfferItems, 'their');
+            }
+
+            function getOfferItems(sectionLabel) {
+                const items = [];
+                // Find section header
+                const headers = Array.from(document.querySelectorAll('h3, .offerRequestCard-0-2-34 h3, .tp-offer-label'));
+                let header = headers.find(h => h.textContent.includes(sectionLabel));
+                if (!header) return items;
+                let container = header.closest('.offerRequestCard-0-2-34, .tp-offer-card, .col-6');
+                if (!container) return items;
+                // Find item slots
+                const slots = container.querySelectorAll('.itemCard-0-2-107, .tp-slot, [class*="itemCard"]');
+                slots.forEach(slot => {
+                    const link = slot.querySelector('a');
+                    if (link) {
+                        const match = link.href.match(/\/catalog\/(\d+)/);
+                        if (match) items.push({ assetId: match[1], element: slot });
+                    } else {
+                        // maybe img with data-id
+                        const img = slot.querySelector('img');
+                        if (img && img.src) {
+                            const match = img.src.match(/assetId=(\d+)/);
+                            if (match) items.push({ assetId: match[1], element: slot });
+                        }
+                    }
+                });
+                return items;
+            }
+
+            function computeTotal(items) {
+                let totalValue = 0, totalRap = 0;
+                items.forEach(item => {
+                    const val = getItemValue(item.assetId);
+                    totalValue += val.value;
+                    totalRap += val.rap;
+                });
+                return { value: totalValue, rap: totalRap };
+            }
+
+            function displayTotals(my, their) {
+                let existing = document.querySelector('.tp-price-summary');
+                if (!existing) {
+                    const container = document.querySelector('.col-8 .row') || document.querySelector('.trade-container');
+                    if (container) {
+                        const div = document.createElement('div');
+                        div.className = 'tp-price-summary';
+                        div.style.cssText = 'background:rgba(0,0,0,0.7);padding:8px;border-radius:8px;margin-top:12px;font-size:12px;color:#fff;';
+                        container.parentElement?.insertBefore(div, container.nextSibling);
+                        existing = div;
+                    } else return;
+                }
+                existing.innerHTML = `
+                    <div style="display:flex;justify-content:space-between;">
+                        <span>Your Offer: Value ${my.value.toLocaleString()} | RAP ${my.rap.toLocaleString()}</span>
+                        <span>Their Offer: Value ${their.value.toLocaleString()} | RAP ${their.rap.toLocaleString()}</span>
+                    </div>
+                    <div style="margin-top:4px;">
+                        Difference: ${(their.value - my.value).toLocaleString()} Value / ${(their.rap - my.rap).toLocaleString()} RAP
+                    </div>
+                `;
+            }
+
+            function checkScam(my, their) {
+                const diffPercent = (their.value - my.value) / (my.value || 1) * 100;
+                if (diffPercent > 30) {
+                    showScamWarning();
+                } else {
+                    removeScamWarning();
+                }
+            }
+
+            function showScamWarning() {
+                let warn = document.querySelector('.tp-scam-warning');
+                if (!warn) {
+                    warn = document.createElement('div');
+                    warn.className = 'tp-scam-warning';
+                    warn.style.cssText = 'background:#ff4444;color:#fff;padding:8px;text-align:center;font-weight:bold;margin:10px 0;border-radius:8px;';
+                    warn.innerHTML = '⚠️ SCAM ALERT: The other side is gaining more than 30% value! ⚠️';
+                    const container = document.querySelector('.col-8') || document.body;
+                    container.prepend(warn);
+                }
+            }
+
+            function removeScamWarning() {
+                const warn = document.querySelector('.tp-scam-warning');
+                if (warn) warn.remove();
+            }
+
+            function addPriceTagsToOfferItems(items, side) {
+                items.forEach(item => {
+                    const slot = item.element;
+                    if (slot.querySelector('.tp-price-tag')) return;
+                    const val = getItemValue(item.assetId);
+                    const tag = document.createElement('div');
+                    tag.className = 'tp-price-tag';
+                    tag.style.cssText = 'font-size:9px;background:#111;color:#aaa;padding:2px 4px;border-radius:4px;margin-top:4px;text-align:center;';
+                    tag.innerHTML = `V:${val.value.toLocaleString()} R:${val.rap.toLocaleString()}`;
+                    const container = slot.querySelector('.itemCard-0-2-107-body') || slot;
+                    container.appendChild(tag);
+                });
+            }
+
+            // Initial call
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initTradePriceCheck);
+            } else {
+                initTradePriceCheck();
+            }
+            // Also watch for navigation
+            const _push = history.pushState;
+            history.pushState = function() {
+                _push.apply(this, arguments);
+                setTimeout(initTradePriceCheck, 500);
+            };
+            window.addEventListener('popstate', () => setTimeout(initTradePriceCheck, 500));
+        })();
+    }
+
+    // ============================================================
     // Навбар меню — стиль из предоставленного пользователем скрипта
     // ============================================================
     const ICON_SVG = `
@@ -210,13 +586,13 @@ fill="none" stroke="currentColor" stroke-width="2">
 
     const SECTIONS = [
         { id: 'ui', label: 'UI & SIDEBAR', color: '#a78bfa', exts: [12, 20] },
-        { id: 'trading', label: 'TRADING', color: '#4f8ef7', exts: [17, 21, 23] },
-        { id: 'social', label: 'SOCIAL', color: '#52c97a', exts: [1, 2, 7, 16, 22] },
+        { id: 'trading', label: 'TRADING', color: '#4f8ef7', exts: [17, 21, 23, 24] },
+        { id: 'social', label: 'SOCIAL', color: '#52c97a', exts: [1, 2, 7, 16, 22, 25, 26] },  // добавлен 26
         { id: 'catalog', label: 'CATALOG & ITEMS', color: '#f59e42', exts: [8, 9, 10, 14, 15] },
         { id: 'avatar', label: 'AVATAR & WARDROBE', color: '#f472b6', exts: [6, 13] },
         { id: 'development', label: 'DEVELOPMENT', color: '#fb7185', exts: [4, 5, 11, 19] },
     ];
-    const EXT_LABELS = Object.assign({20: 'Collapse Sidebar'}, Object.fromEntries(Object.entries(EXT_META).map(([k,v])=>[+k,v])));
+    const EXT_LABELS = Object.assign({20: 'Collapse Sidebar', 24: 'Trade Price Check', 25: 'Whitelist/Blacklist', 26: 'Trading Lounge'}, Object.fromEntries(Object.entries(EXT_META).map(([k,v])=>[+k,v])));
 
     function sidebarFeature()     { return GM_getValue('korone_sidebar_feature', false); }
     function setSidebarFeature(v) { GM_setValue('korone_sidebar_feature', v); }
@@ -664,6 +1040,16 @@ fill="none" stroke="currentColor" stroke-width="2">
                 }
             })();
         }
+
+        // Добавляем секцию Whitelist/Blacklist
+        (async () => {
+            const wlSec = await buildWhitelistBlacklistPanelSection();
+            if (wlSec) {
+                rows.appendChild(wlSec.header);
+                rows.appendChild(wlSec.body);
+                wlSec.body.style.maxHeight = (wlSec.body.scrollHeight || 200) + 'px';
+            }
+        })();
 
         panel.appendChild(rows);
 
@@ -1691,7 +2077,7 @@ fill="none" stroke="currentColor" stroke-width="2">
             var body=card.querySelector('.card-body');if(!body)return;
             body.querySelectorAll('.rolify-row').forEach(function(e){e.remove();});card.querySelectorAll('.rolify-item-name').forEach(function(e){e.remove();});
             var cardLink=card.querySelector('a[href]');var cardAssetId=null;if(cardLink){var m=cardLink.getAttribute('href').match(/\/catalog\/(\d+)/);if(m)cardAssetId=m[1];}var ps=body.querySelectorAll('p'),name='',stats=[];
-            ps.forEach(function(p){var t=p.textContent.trim();if(p.classList.contains('fw-bolder')){name=t;p.classList.add('rolify-hide');return;}if(t.startsWith('RAP:')){var rap=t.replace('RAP:','').trim();stats.push({l:'RAP',v:rap});stats.push({l:'Value',v:(cardAssetId?getvaluebyid(cardAssetId):getvalue(name)).toLocaleString()});p.classList.add('rolify-hide');return;}if(t.startsWith('Serial:')){var serial=t.replace('Serial:','').trim();if(serial.includes(' of '))serial=serial.split(' of ')[0];stats.push({l:'Serial',v:serial});p.classList.add('rolify-hide');return;}if(t.startsWith('UAID:')){stats.push({l:'UAID',v:t.replace('UAID:','').trim()});p.classList.add('rolify-hide');}});
+            ps.forEach(function(p){var t=p.textContent.trim();if(p.classList.contains('fw-bolder')){name=t;p.classList.add('rolify-hide');return;}if(t.startsWith('RAP:')){var rap=t.replace('RAP:','').trim();stats.push({l:'RAP',v:rap});stats.push({l:'Value',v:(cardAssetId?getvaluebyid(cardAssetId):getvalue(name)).toLocaleString()});p.classList.add('rolify-hide');return;}if(t.startsWith('Serial:')){var serial=t.replace('Serial:','').trim();if(serial.includes(' of '))serial=serial.split(' of ')[0];stats.push({l:'Serial',v:serial});p.classList.add('rolify-hide');return;}if(t.startsWith('UAID:')){stats.push({l:'UAID',v:t.replace('UAID:','').trim()});p.classList.add('rolify-hide');return;}});
             var cardel=card.querySelector('.card.bg-dark');if(name&&cardel){var el=document.createElement('span');el.className='rolify-item-name';el.title=name;el.textContent=name;cardel.insertBefore(el,cardel.firstChild);}
             var frag=document.createDocumentFragment();
             stats.forEach(function(s){var row=document.createElement('div');row.className='rolify-row';var l=document.createElement('span');l.className='rolify-label';l.textContent=s.l;var v=document.createElement('span');v.className='rolify-value';v.textContent=s.v;if(s.l==='Serial')v.classList.add('rolify-serial');if(s.l==='UAID')v.classList.add('rolify-uaid');row.appendChild(l);row.appendChild(v);frag.appendChild(row);});
@@ -3385,7 +3771,7 @@ kbH +
     })();
 
     // ============================================================
-    // #17 — Trade Notifier (без масс-трейдера) - domain adapted
+    // #17 — Trade Notifier (without mass trader) - adapted to use shared blacklist
     // ============================================================
     (function () {
         if (!extEnabled(17)) return;
@@ -3400,8 +3786,6 @@ kbH +
         const EP_TRADE_SEND = BASE + '/apisite/trades/v1/trades/send';
         const STORE_KEY = 'pekora_seen_trade_ids';
         const SETTINGS_KEY = 'pekora_tn_settings';
-        const BLOCKED_KEY = 'pekora_blocked_users';
-        const BLACKLIST_ITEMS_KEY = 'pekora_blacklist_items';
         const SPAM_TRACKER_KEY = 'pekora_spam_tracker';
         const TRADE_HISTORY_KEY = 'pekora_trade_history';
         const MAX_STORED = 500;
@@ -3422,37 +3806,6 @@ kbH +
         function loadSettings() { try { const r = localStorage.getItem(SETTINGS_KEY); if (r) return Object.assign({}, defaultSettings, JSON.parse(r)); } catch {} return Object.assign({}, defaultSettings); }
         function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {} }
         function setSetting(k, v) { settings[k] = v; saveSettings(); }
-        function loadBlocked() {
-            try {
-                const raw = JSON.parse(GM_getValue(BLOCKED_KEY, '{}'));
-                if (Array.isArray(raw)) {
-                    const obj = {};
-                    for (const id of raw) obj[id] = { userId: id, username: 'User #' + id };
-                    return obj;
-                }
-                return raw;
-            } catch { return {}; }
-        }
-        function saveBlocked() { try { GM_setValue(BLOCKED_KEY, JSON.stringify(blockedUsers)); } catch {} }
-        function blockUser(uid, username) { blockedUsers[uid] = { userId: uid, username: username || ('User #' + uid) }; saveBlocked(); if (panelOpen) refreshPanel(); }
-        function unblockUser(uid) { delete blockedUsers[uid]; saveBlocked(); if (panelOpen) refreshPanel(); }
-        function isBlocked(uid) { return !!blockedUsers[uid]; }
-        function loadBlacklist() { try { return new Set(JSON.parse(GM_getValue(BLACKLIST_ITEMS_KEY, '[]'))); } catch { return new Set(); } }
-        function saveBlacklist() { try { GM_setValue(BLACKLIST_ITEMS_KEY, JSON.stringify([...blacklistedItems])); } catch {} }
-        function blacklistItem(assetId) { blacklistedItems.add(parseInt(assetId)); saveBlacklist(); }
-        function unblacklistItem(assetId) { blacklistedItems.delete(parseInt(assetId)); saveBlacklist(); }
-        function isBlacklisted(assetId) { return blacklistedItems.has(parseInt(assetId)); }
-        function tradeHasBlacklistedItem(det) {
-            if (!det || !Array.isArray(det.offers)) return false;
-            for (const offer of det.offers) {
-                if (offer.userAssets) {
-                    for (const asset of offer.userAssets) {
-                        if (isBlacklisted(asset.assetId)) return true;
-                    }
-                }
-            }
-            return false;
-        }
         function loadSpamTracker() { try { return JSON.parse(GM_getValue(SPAM_TRACKER_KEY, '{}')); } catch { return {}; } }
         function saveSpamTracker() { try { GM_setValue(SPAM_TRACKER_KEY, JSON.stringify(spamTracker)); } catch {} }
         function trackTrade(uid, tid) {
@@ -3475,17 +3828,26 @@ kbH +
         }
         function getUserHistory(uid) { return tradeHistory[uid] || null; }
 
-        let settings = loadSettings(), blockedUsers = loadBlocked(), spamTracker = loadSpamTracker(), blacklistedItems = loadBlacklist();
+        let settings = loadSettings(), spamTracker = loadSpamTracker();
         let tradeHistory = loadTradeHistory(), koromonsItems = {}, seen = loadSeen(), first = true;
         let panelOpen = false, panelTrades = [], panelDetails = {}, panelHeads = {};
         let assetThumbs = {}, csrfToken = null, pollTimer = null, creditsHeads = {};
 
-        function playSound() {
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                function beep(f, s, d, v) { const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(v, ctx.currentTime + s); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + s + d); o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime + s); o.stop(ctx.currentTime + s + d); }
-                beep(880, 0, 0.15, 0.3); beep(1100, 0.12, 0.15, 0.25); beep(1320, 0.24, 0.2, 0.2);
-            } catch {}
+                function playSound() {
+            if (!settings.sound) return;
+            // Если есть кастомный звук из модуля #29 — используем его
+            if (typeof window._tradeNotifierCustomPlaySound === 'function') {
+                window._tradeNotifierCustomPlaySound();
+            } else {
+                // Старый стандартный звук
+                try {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    function beep(f, s, d, v) {const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(v, ctx.currentTime + s); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + s + d); o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime + s); o.stop(ctx.currentTime + s + d); } // ваш старый код
+                    beep(880, 0, 0.15, 0.3);
+                    beep(1100, 0.12, 0.15, 0.25);
+                    beep(1320, 0.24, 0.2, 0.2);
+                } catch(e) {}
+            }
         }
         function esc(s) { const d = document.createElement('div'); d.textContent = String(s != null ? s : ''); return d.innerHTML; }
         function loadSeen() { try { return new Set(JSON.parse(GM_getValue(STORE_KEY, '[]'))); } catch { return new Set(); } }
@@ -3719,7 +4081,7 @@ kbH +
                 await apiPost(EP_DETAIL + '/' + tid + '/decline', {});
                 const trade = panelTrades.find(t => t.id === tid);
                 const username = trade ? trade.user.displayName : ('User #' + uid);
-                blockUser(uid, username);
+                addToBlacklist(uid); // Use shared blacklist
                 setStatus(btn, 'as-ok', '\u2713 Blocked');
                 setTimeout(refreshPanel, 1200);
             }
@@ -3879,7 +4241,18 @@ kbH +
             const p = document.createElement('div');
             p.id = 'rol-panel';
             p.className = 'rol-panel';
-            const blockedEntries = Object.values(blockedUsers);
+            const blockedEntries = Array.from(blacklist).map(uid => ({ userId: uid, username: 'User #' + uid }));
+            // try to fetch usernames
+            if (blockedEntries.length) {
+                try {
+                    const usersData = await apiGet(BASE + '/apisite/users/v1/users?userIds=' + blockedEntries.map(u=>u.userId).join(','), true);
+                    const users = usersData.data || [];
+                    for (const u of users) {
+                        const entry = blockedEntries.find(e => e.userId == u.id);
+                        if (entry) entry.username = u.displayName || u.name;
+                    }
+                } catch(e) {}
+            }
             const uids = blockedEntries.map(u => u.userId);
             const heads = uids.length > 0 ? await fetchHeads(uids) : {};
             let listHtml = '';
@@ -3894,7 +4267,7 @@ kbH +
             p.innerHTML = '<div class="rol-h"><div class="rol-hl"><span class="rol-title">Blocked Users (' + blockedEntries.length + ')</span></div><span class="rol-x">\u2715</span></div><div class="rol-body"><div class="bl-list">' + listHtml + '</div></div>';
             document.body.appendChild(p);
             p.querySelector('.rol-x').addEventListener('click', () => p.remove());
-            p.querySelectorAll('.bl-unblock-full').forEach(btn => { btn.addEventListener('click', () => { unblockUser(parseInt(btn.dataset.uid)); p.remove(); showBlockedUsersPanel(); }); });
+            p.querySelectorAll('.bl-unblock-full').forEach(btn => { btn.addEventListener('click', () => { removeFromBlacklist(parseInt(btn.dataset.uid)); p.remove(); showBlockedUsersPanel(); }); });
         }
 
         async function showCreditsPanel() {
@@ -3908,44 +4281,33 @@ kbH +
                 const img = creditsHeads[c.userId] || fb;
                 credHtml += '<a href="' + esc(c.profileUrl) + '" target="_blank" class="cr-card"><img src="' + img + '" class="cr-av"><div class="cr-info"><div class="cr-name">' + esc(c.username) + '</div><div class="cr-meta"><span class="cr-role" style="color:' + roleColor(c.role) + ';background:' + roleBg(c.role) + '">' + esc(c.role) + '</span><span class="cr-id">ID: ' + c.userId + '</span></div><div class="cr-desc">' + esc(c.description) + '</div></div></a>';
             }
-            const blockedEntries = Object.values(blockedUsers);
+            const blockedEntries = Array.from(blacklist).map(uid => ({ userId: uid, username: 'User #' + uid }));
             if (blockedEntries.length) {
                 const uids = blockedEntries.map(u => u.userId);
                 const heads = await fetchHeads(uids);
                 Object.assign(panelHeads, heads);
-                const needNames = blockedEntries.filter(u => !u.username || u.username === ('User #' + u.userId));
-                if (needNames.length) {
-                    try {
-                        const j = await apiGet(BASE + '/apisite/users/v1/users?userIds=' + needNames.map(u => u.userId).join(','), true);
-                        const users = j.data || (Array.isArray(j) ? j : []);
-                        for (const u of users) { if (blockedUsers[u.id]) blockedUsers[u.id].username = u.displayName || u.name || ('User #' + u.id); }
-                        for (const entry of needNames) {
-                            if (blockedUsers[entry.userId] && blockedUsers[entry.userId].username === ('User #' + entry.userId)) {
-                                try { const u2 = await apiGet(BASE + '/apisite/users/v1/users/' + entry.userId, true); if (u2 && (u2.displayName || u2.name)) blockedUsers[entry.userId].username = u2.displayName || u2.name; } catch {}
-                            }
-                        }
-                        saveBlocked();
-                    } catch {
-                        for (const entry of needNames) {
-                            try { const u = await apiGet(BASE + '/apisite/users/v1/users/' + entry.userId, true); if (u && (u.displayName || u.name)) blockedUsers[entry.userId].username = u.displayName || u.name; } catch {}
-                        }
-                        saveBlocked();
+                // try to fetch usernames
+                try {
+                    const usersData = await apiGet(BASE + '/apisite/users/v1/users?userIds=' + uids.join(','), true);
+                    const users = usersData.data || [];
+                    for (const u of users) {
+                        const entry = blockedEntries.find(e => e.userId == u.id);
+                        if (entry) entry.username = u.displayName || u.name;
                     }
-                }
+                } catch(e) {}
             }
             const blFb = "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 1 1%22><rect fill=%22%23222%22 width=%221%22 height=%221%22/></svg>";
-            const updatedBlocked = Object.values(blockedUsers);
-            let blHtml = '<div class="rol-section"><div class="rol-section-title">Blocked Users (' + updatedBlocked.length + ')</div>';
-            if (updatedBlocked.length > 0) {
-                const previewUsers = updatedBlocked.slice(0, 5);
+            let blHtml = '<div class="rol-section"><div class="rol-section-title">Blocked Users (' + blockedEntries.length + ')</div>';
+            if (blockedEntries.length > 0) {
+                const previewUsers = blockedEntries.slice(0, 5);
                 blHtml += '<div style="display:flex;align-items:center;justify-content:space-between;margin:10px 0">';
                 blHtml += '<div style="display:flex">';
                 for (let i = 0; i < previewUsers.length; i++) {
                     const avatar = panelHeads[previewUsers[i].userId] || blFb;
                     blHtml += '<div style="width:32px;height:32px;border-radius:50%;overflow:hidden;background:#111;border:2px solid #393b3d;' + (i > 0 ? 'margin-left:-10px;' : '') + 'position:relative;z-index:' + (10 - i) + '"><img src="' + avatar + '" style="width:100%;height:100%;object-fit:cover"></div>';
                 }
-                if (updatedBlocked.length > 5) {
-                    blHtml += '<div style="width:32px;height:32px;border-radius:50%;background:#2b2d2f;border:2px solid #393b3d;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:700;margin-left:-10px">+' + (updatedBlocked.length - 5) + '</div>';
+                if (blockedEntries.length > 5) {
+                    blHtml += '<div style="width:32px;height:32px;border-radius:50%;background:#2b2d2f;border:2px solid #393b3d;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:700;margin-left:-10px">+' + (blockedEntries.length - 5) + '</div>';
                 }
                 blHtml += '</div>';
                 blHtml += '<button id="bl-show-panel-btn" style="padding:6px 12px;background:#0074bd;border:1px solid #0074bd;border-radius:4px;color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s">Show All Blocked Users</button>';
@@ -3998,7 +4360,7 @@ kbH +
             p.querySelector('#rol-tdur').addEventListener('change', function() { setSetting('toastDuration', parseInt(this.value)); });
             p.querySelector('#rol-thov').addEventListener('input', function() { document.getElementById('rol-thov-val').textContent=(parseInt(this.value)/1000)+'s'; });
             p.querySelector('#rol-thov').addEventListener('change', function() { setSetting('toastHoverDelay', parseInt(this.value)); });
-            p.querySelectorAll('.bl-unblock').forEach(btn => btn.addEventListener('click', () => { unblockUser(parseInt(btn.dataset.uid)); closeCreditsPanel(); showCreditsPanel(); }));
+            p.querySelectorAll('.bl-unblock').forEach(btn => btn.addEventListener('click', () => { removeFromBlacklist(parseInt(btn.dataset.uid)); closeCreditsPanel(); showCreditsPanel(); }));
             const blShowPanelBtn = p.querySelector('#bl-show-panel-btn');
             if (blShowPanelBtn) {
                 blShowPanelBtn.addEventListener('click', async (e) => { e.preventDefault(); e.stopPropagation(); closeCreditsPanel(); try { await showBlockedUsersPanel(); } catch (err) {} });
@@ -4047,7 +4409,7 @@ kbH +
 
         function showToast(trade, img, det) { if (!settings.toast) return; injectCss(); const fb = "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 1 1%22><rect fill=%22%23222%22 width=%221%22 height=%221%22/></svg>"; const { sending, receiving } = splitOffers(det, trade.user.id); const compact = settings.compactMode; let sum = '', expHtml = ''; if (det && Array.isArray(det.offers)) { sum = summaryHtml(det, trade.user.id, compact); if (!compact) expHtml = '<div class="to-s"><div class="to-l">They offer</div>' + offerHtml(sending, compact) + '</div><div class="to-s"><div class="to-l">They want</div>' + offerHtml(receiving, compact) + '</div>'; } const el = document.createElement('div'); el.className = 'nt' + (compact ? ' nt-compact' : ''); let timer = null; el.innerHTML = '<div class="nt-inner"><img src="' + (img || fb) + '" onerror="this.src=\'' + fb + '\'" class="nt-av"><div class="nt-b"><div class="nt-t">' + esc(trade.user.displayName) + ' sent a trade</div><div class="nm">#' + trade.id + ' \xB7 ' + ago(trade.created) + ' \xB7 expires ' + until(trade.expiration) + '</div>' + (sum||'') + '<div class="nt-exp">' + expHtml + '</div>' + (compact ? '' : actionsHtml(trade.id, trade.user.id, 'nt')) + '</div></div>'; bindActions(el); el.addEventListener('mouseenter', () => { if (timer) { clearTimeout(timer); timer = null; } }); el.addEventListener('mouseleave', () => { timer = setTimeout(dismiss, settings.toastHoverDelay); }); getContainer().appendChild(el); function dismiss() { el.classList.add('nout'); el.addEventListener('animationend', () => el.remove()); } timer = setTimeout(dismiss, settings.toastDuration); }
 
-        async function poll() { try { const allTrades = await fetchInbound(); for (const t of allTrades) { if (!seen.has(t.id) && !isBlocked(t.user.id)) { if (trackTrade(t.user.id, t.id)) { blockUser(t.user.id, t.user.displayName); try { await apiPost(EP_DETAIL + '/' + t.id + '/decline', {}); } catch {} seen.add(t.id); } } } if (settings.autoDeclineBlocked) { for (const t of allTrades) { if (isBlocked(t.user.id) && !seen.has(t.id)) { try { await apiPost(EP_DETAIL + '/' + t.id + '/decline', {}); } catch {} seen.add(t.id); } } } if (settings.autoDeclineBlacklist) { for (const t of allTrades) { if (!seen.has(t.id) && !isBlocked(t.user.id)) { const det = panelDetails[t.id] || await fetchDetail(t.id).catch(() => null); if (det && tradeHasBlacklistedItem(det)) { try { await apiPost(EP_DETAIL + '/' + t.id + '/decline', {}); } catch {} seen.add(t.id); } } } } const trades = allTrades.filter(t => !isBlocked(t.user.id)); updateBadge(await fetchCount()); const cur = new Set(trades.map(t => t.id)); let dirty = false; for (const id of [...seen]) { if (!cur.has(id)) { seen.delete(id); dirty = true; } } const fresh = trades.filter(t => !seen.has(t.id)); if (fresh.length) { const uids = [...new Set(fresh.map(t => t.user.id))]; const heads = await fetchHeads(uids); Object.assign(panelHeads, heads); for (const t of fresh) { seen.add(t.id); if (first) continue; let det = null; try { det = await fetchDetail(t.id); panelDetails[t.id] = det; const aIds = collectAssetIds(det); if (aIds.length) await fetchAssetThumbs(aIds); } catch {} sendNotify(t, heads[t.user.id] || null, det); showToast(t, heads[t.user.id] || null, det); } dirty = true; } if (dirty) saveSeen(seen); first = false; if (panelOpen) { panelTrades = trades; renderPanelContent(); } } catch {} }
+        async function poll() { try { const allTrades = await fetchInbound(); for (const t of allTrades) { if (!seen.has(t.id) && !isBlacklisted(t.user.id)) { if (trackTrade(t.user.id, t.id)) { addToBlacklist(t.user.id); try { await apiPost(EP_DETAIL + '/' + t.id + '/decline', {}); } catch {} seen.add(t.id); } } } if (settings.autoDeclineBlocked) { for (const t of allTrades) { if (isBlacklisted(t.user.id) && !seen.has(t.id)) { try { await apiPost(EP_DETAIL + '/' + t.id + '/decline', {}); } catch {} seen.add(t.id); } } } if (settings.autoDeclineBlacklist) { for (const t of allTrades) { if (!seen.has(t.id) && !isBlacklisted(t.user.id)) { const det = panelDetails[t.id] || await fetchDetail(t.id).catch(() => null); if (det && tradeHasBlacklistedItem(det)) { try { await apiPost(EP_DETAIL + '/' + t.id + '/decline', {}); } catch {} seen.add(t.id); } } } } const trades = allTrades.filter(t => !isBlacklisted(t.user.id)); updateBadge(await fetchCount()); const cur = new Set(trades.map(t => t.id)); let dirty = false; for (const id of [...seen]) { if (!cur.has(id)) { seen.delete(id); dirty = true; } } const fresh = trades.filter(t => !seen.has(t.id)); if (fresh.length) { const uids = [...new Set(fresh.map(t => t.user.id))]; const heads = await fetchHeads(uids); Object.assign(panelHeads, heads); for (const t of fresh) { seen.add(t.id); if (first) continue; let det = null; try { det = await fetchDetail(t.id); panelDetails[t.id] = det; const aIds = collectAssetIds(det); if (aIds.length) await fetchAssetThumbs(aIds); } catch {} sendNotify(t, heads[t.user.id] || null, det); showToast(t, heads[t.user.id] || null, det); } dirty = true; } if (dirty) saveSeen(seen); first = false; if (panelOpen) { panelTrades = trades; renderPanelContent(); } } catch {} }
 
         async function init() { if (extEnabled(17)) { if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission(); injectCss(); injectBadge(); await seedCsrf(); await Promise.all([fetchKoromons(), fetchCreditsHeads()]); poll(); pollTimer = setInterval(poll, settings.pollInterval); setInterval(fetchKoromons, 300000); if (window.location.pathname.includes('/My/Trades') || window.location.href.includes('/My/Trades')) { await fetchKoromons(); injectPekoraIndicators(); setInterval(() => { injectPekoraIndicators(); }, 4000); new MutationObserver(() => { setTimeout(injectPekoraIndicators, 600); }).observe(document.body, { childList: true, subtree: true }); } } new MutationObserver(() => { if (extEnabled(17)) injectBadge(); }).observe(document.body, { childList: true, subtree: true }); }
 
@@ -4294,6 +4656,1158 @@ kbH +
     })();
 
     // ============================================================
+    // Trading Lounge (Firebase REST через GM_xmlhttpRequest) – Feature #26
+    // ============================================================
+    (function() {
+        if (!extEnabled(26)) return;
+
+        const FIREBASE_CONFIG = {
+            apiKey: "AIzaSyDPpk71aNEZirUMpINnzsnPYwgIZgH4qzM",
+            projectId: "tradelounge-13f55"
+        };
+        const FIRESTORE_API = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents`;
+
+        let currentUser = null;
+        let chatWindow = null;
+        let pollInterval = null;
+
+        // GET-запрос через GM_xmlhttpRequest
+        function gmFetch(url) {
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: url,
+                    headers: { 'Content-Type': 'application/json' },
+                    onload: (resp) => {
+                        if (resp.status >= 200 && resp.status < 300) {
+                            try {
+                                resolve(JSON.parse(resp.responseText));
+                            } catch(e) { reject(e); }
+                        } else {
+                            reject(new Error(`HTTP ${resp.status}`));
+                        }
+                    },
+                    onerror: reject
+                });
+            });
+        }
+
+        // POST-запрос через GM_xmlhttpRequest
+        function gmPost(url, data) {
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: url,
+                    headers: { 'Content-Type': 'application/json' },
+                    data: JSON.stringify(data),
+                    onload: (resp) => {
+                        if (resp.status >= 200 && resp.status < 300) {
+                            try {
+                                resolve(JSON.parse(resp.responseText));
+                            } catch(e) { resolve({}); }
+                        } else {
+                            reject(new Error(`HTTP ${resp.status}`));
+                        }
+                    },
+                    onerror: reject
+                });
+            });
+        }
+
+        async function getCurrentUser() {
+            try {
+                const resp = await fetch('https://froot.club/apisite/users/v1/users/authenticated', { credentials: 'include' });
+                const data = await resp.json();
+                const uid = String(data.id);
+                const name = data.displayName || data.name || 'User';
+                const thumbResp = await fetch(`https://froot.club/apisite/thumbnails/v1/users/avatar-headshot?userIds=${uid}&size=64x64&format=Png`, { credentials: 'include' });
+                const thumbData = await thumbResp.json();
+                const avatar = thumbData.data?.[0]?.imageUrl || 'https://froot.club/img/placeholder.png';
+                return { id: uid, name, avatar };
+            } catch(e) {
+                console.error('[Trading Lounge] Failed to get user info:', e);
+                return { id: '0', name: 'Guest', avatar: 'https://froot.club/img/placeholder.png' };
+            }
+        }
+
+        async function sendMessage(text) {
+            if (!currentUser) currentUser = await getCurrentUser();
+            const message = {
+                fields: {
+                    userId: { stringValue: currentUser.id },
+                    userName: { stringValue: currentUser.name },
+                    userAvatar: { stringValue: currentUser.avatar },
+                    text: { stringValue: text },
+                    timestamp: { timestampValue: new Date().toISOString() }
+                }
+            };
+            try {
+                const docId = Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+                await gmPost(`${FIRESTORE_API}/messages?documentId=${docId}`, message);
+                return true;
+            } catch(e) {
+                console.error('[Trading Lounge] Send error:', e);
+                return false;
+            }
+        }
+
+        async function loadMessages() {
+            try {
+                const url = `${FIRESTORE_API}/messages?orderBy=timestamp&pageSize=100`;
+                const data = await gmFetch(url);
+                const docs = data.documents || [];
+                const messages = docs.map(doc => {
+                    const fields = doc.fields;
+                    return {
+                        id: doc.name.split('/').pop(),
+                        userId: fields.userId?.stringValue || '',
+                        userName: fields.userName?.stringValue || 'Unknown',
+                        userAvatar: fields.userAvatar?.stringValue || '',
+                        text: fields.text?.stringValue || '',
+                        timestamp: fields.timestamp?.timestampValue || new Date().toISOString()
+                    };
+                });
+                messages.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+                return messages;
+            } catch(e) {
+                console.error('[Trading Lounge] Load error:', e);
+                return [];
+            }
+        }
+
+        // Создание окна в стиле панели FrooExp (без затемнения)
+        function createChatWindow(title, content) {
+            const win = document.createElement('div');
+            win.className = 'tl-window';
+            win.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 460px;
+                max-width: 90%;
+                background: #ffffff;
+                border: 1px solid #d8d8d8;
+                border-radius: 0px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                z-index: 999991;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                font-family: Arial, sans-serif;
+            `;
+
+            const header = document.createElement('div');
+            header.className = 'tl-header';
+            header.style.cssText = `
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 12px;
+                border-bottom: 1px solid #e5e5e5;
+                background: #fff;
+                cursor: move;
+                user-select: none;
+            `;
+            header.innerHTML = `
+                <span style="font-size: 13px; font-weight: 700; text-transform: uppercase; color: #111;">${title}</span>
+                <button class="tl-close" style="background: none; border: none; font-size: 18px; cursor: pointer; color: #999;">&times;</button>
+            `;
+
+            const body = document.createElement('div');
+            body.className = 'tl-body';
+            body.style.cssText = `
+                flex: 1;
+                overflow-y: auto;
+                padding: 12px;
+                background: #fff;
+                max-height: 480px;
+                min-height: 320px;
+            `;
+            body.appendChild(content);
+
+            win.appendChild(header);
+            win.appendChild(body);
+            document.body.appendChild(win);
+
+            const close = () => {
+                win.remove();
+                if (chatWindow === win) chatWindow = null;
+                if (content._cleanup) content._cleanup();
+                if (pollInterval) clearInterval(pollInterval);
+            };
+            header.querySelector('.tl-close').addEventListener('click', close);
+
+            // Перетаскивание
+            let offsetX, offsetY, isDragging = false;
+            header.addEventListener('mousedown', (e) => {
+                if (e.target === header.querySelector('.tl-close')) return;
+                isDragging = true;
+                const rect = win.getBoundingClientRect();
+                offsetX = e.clientX - rect.left;
+                offsetY = e.clientY - rect.top;
+                win.style.transform = 'none';
+                win.style.top = rect.top + 'px';
+                win.style.left = rect.left + 'px';
+                e.preventDefault();
+            });
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                let left = e.clientX - offsetX;
+                let top = e.clientY - offsetY;
+                left = Math.min(Math.max(left, 10), window.innerWidth - win.offsetWidth - 10);
+                top = Math.min(Math.max(top, 10), window.innerHeight - win.offsetHeight - 10);
+                win.style.left = left + 'px';
+                win.style.top = top + 'px';
+            });
+            window.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            return win;
+        }
+
+        async function buildChatUI() {
+            if (!currentUser) currentUser = await getCurrentUser();
+
+            const container = document.createElement('div');
+            container.style.display = 'flex';
+            container.style.flexDirection = 'column';
+            container.style.height = '100%';
+
+            const messagesDiv = document.createElement('div');
+            messagesDiv.className = 'tl-messages';
+            messagesDiv.style.cssText = `
+                flex: 1;
+                overflow-y: auto;
+                margin-bottom: 12px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                max-height: 380px;
+            `;
+            container.appendChild(messagesDiv);
+
+            const inputArea = document.createElement('div');
+            inputArea.style.cssText = `
+                display: flex;
+                gap: 8px;
+                border-top: 1px solid #e5e5e5;
+                padding-top: 12px;
+            `;
+            const textarea = document.createElement('textarea');
+            textarea.placeholder = 'Type your message...';
+            textarea.style.cssText = `
+                flex: 1;
+                padding: 8px 12px;
+                border-radius: 0px;
+                border: 1px solid #ccc;
+                resize: none;
+                font-family: inherit;
+                font-size: 13px;
+                background: #fff;
+                color: #111;
+                outline: none;
+            `;
+            textarea.rows = 1;
+            const sendBtn = document.createElement('button');
+            sendBtn.textContent = 'Send';
+            sendBtn.style.cssText = `
+                background: #111;
+                color: #fff;
+                border: none;
+                border-radius: 0px;
+                padding: 0 16px;
+                font-weight: 600;
+                cursor: pointer;
+                font-size: 12px;
+            `;
+            inputArea.appendChild(textarea);
+            inputArea.appendChild(sendBtn);
+            container.appendChild(inputArea);
+
+            textarea.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 80) + 'px';
+            });
+            textarea.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessageHandler();
+                }
+            });
+
+            async function refreshMessages() {
+                const messages = await loadMessages();
+                messagesDiv.innerHTML = '';
+                if (messages.length === 0) {
+                    const emptyMsg = document.createElement('div');
+                    emptyMsg.style.textAlign = 'center';
+                    emptyMsg.style.color = '#999';
+                    emptyMsg.style.padding = '30px 0';
+                    emptyMsg.style.fontSize = '12px';
+                    emptyMsg.textContent = 'No messages yet. Be the first!';
+                    messagesDiv.appendChild(emptyMsg);
+                } else {
+                    messages.forEach(msg => {
+                        const msgEl = document.createElement('div');
+                        msgEl.style.cssText = `
+                            display: flex;
+                            gap: 10px;
+                            padding: 8px;
+                            background: #fafafa;
+                            border: 1px solid #efefef;
+                        `;
+                        const avatar = document.createElement('img');
+                        avatar.src = msg.userAvatar || 'https://froot.club/img/placeholder.png';
+                        avatar.style.cssText = 'width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex-shrink: 0;';
+                        const contentDiv = document.createElement('div');
+                        contentDiv.style.flex = '1';
+                        const nameSpan = document.createElement('div');
+                        nameSpan.style.cssText = 'font-weight: 600; font-size: 12px; margin-bottom: 4px; display: flex; justify-content: space-between;';
+                        nameSpan.innerHTML = `<span>${escapeHTML(msg.userName)}</span>`;
+                        const timeSpan = document.createElement('span');
+                        timeSpan.style.cssText = 'font-size: 10px; color: #888; font-weight: normal;';
+                        const date = new Date(msg.timestamp);
+                        timeSpan.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' });
+                        nameSpan.appendChild(timeSpan);
+                        const textSpan = document.createElement('div');
+                        textSpan.style.cssText = 'font-size: 12px; word-break: break-word; line-height: 1.4;';
+                        textSpan.textContent = msg.text;
+                        contentDiv.appendChild(nameSpan);
+                        contentDiv.appendChild(textSpan);
+                        msgEl.appendChild(avatar);
+                        msgEl.appendChild(contentDiv);
+                        messagesDiv.appendChild(msgEl);
+                    });
+                }
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+
+            async function sendMessageHandler() {
+                const text = textarea.value.trim();
+                if (!text) return;
+                textarea.disabled = true;
+                sendBtn.disabled = true;
+                const success = await sendMessage(text);
+                if (success) {
+                    textarea.value = '';
+                    textarea.style.height = 'auto';
+                    await refreshMessages();
+                } else {
+                    alert('Failed to send message. Check console.');
+                }
+                textarea.disabled = false;
+                sendBtn.disabled = false;
+                textarea.focus();
+            }
+
+            sendBtn.addEventListener('click', sendMessageHandler);
+            await refreshMessages();
+
+            if (pollInterval) clearInterval(pollInterval);
+            pollInterval = setInterval(refreshMessages, 3000);
+
+            container._cleanup = () => {
+                if (pollInterval) clearInterval(pollInterval);
+                pollInterval = null;
+            };
+
+            return container;
+        }
+
+        async function openChatWindow() {
+            if (chatWindow) {
+                chatWindow.remove();
+                chatWindow = null;
+                if (pollInterval) clearInterval(pollInterval);
+                return;
+            }
+            const chatContent = await buildChatUI();
+            if (!chatContent) {
+                alert('Failed to build chat UI.');
+                return;
+            }
+            const win = createChatWindow('Trading Lounge', chatContent);
+            chatWindow = win;
+        }
+
+        let injectionAttempts = 0;
+        function injectTradingLoungeButton() {
+            const sidebar = document.querySelector('div[class*="card"]');
+            if (!sidebar) {
+                if (injectionAttempts < 20) {
+                    injectionAttempts++;
+                    setTimeout(injectTradingLoungeButton, 500);
+                }
+                return;
+            }
+            if (document.getElementById('tl-sidebar-btn')) return;
+
+            const homeBtn = [...sidebar.querySelectorAll('a')].find(a => a.textContent.trim() === 'Home');
+            if (!homeBtn) return;
+
+            const btn = homeBtn.cloneNode(true);
+            btn.id = 'tl-sidebar-btn';
+            btn.href = 'javascript:void(0)';
+            // Уменьшаем название
+            const iconSpan = document.createElement('span');
+            iconSpan.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-right:4px;vertical-align:middle;flex-shrink:0;opacity:0.85';
+            iconSpan.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/></svg>';
+            const existingIcon = btn.querySelector('svg, span[class*="icon"]');
+            if (existingIcon) existingIcon.replaceWith(iconSpan);
+            else btn.prepend(iconSpan);
+            const textSpan = [...btn.querySelectorAll('*')].find(el => el.children.length === 0 && el.textContent.trim() !== '');
+            if (textSpan) textSpan.textContent = 'Trading'; // короткое название
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                openChatWindow();
+            });
+            const upgradeBtn = [...sidebar.querySelectorAll('a')].find(a => a.textContent.includes('Upgrade'));
+            if (upgradeBtn) sidebar.insertBefore(btn, upgradeBtn);
+            else sidebar.appendChild(btn);
+            console.log('[Trading Lounge] Button injected');
+        }
+
+        async function initTradingLounge() {
+            try {
+                console.log('[Trading Lounge] Initializing (GM_xmlhttpRequest mode)...');
+                currentUser = await getCurrentUser();
+                console.log('[Trading Lounge] User loaded:', currentUser.name);
+                injectionAttempts = 0;
+                injectTradingLoungeButton();
+                const observer = new MutationObserver(() => {
+                    injectTradingLoungeButton();
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+            } catch(e) {
+                console.error('[Trading Lounge] Init failed:', e);
+            }
+        }
+
+        initTradingLounge();
+    })();
+
+
+     // ============================================================
+    // #28 — Username History (полная история ников пользователя)
+   // ============================================================
+    (function () {
+        if (!extEnabled(28)) return;
+
+        async function fetchUsernameHistory(userId) {
+            return new Promise((resolve) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: `https://froot.club/apisite/users/v1/users/${userId}/username-history?limit=100`,
+                    withCredentials: true,
+                    headers: { 'Accept': 'application/json' },
+                    onload: function (r) {
+                        try {
+                            const data = JSON.parse(r.responseText);
+                            resolve(data.data || []);
+                        } catch (e) {
+                            console.error('[UsernameHistory] parse error', e);
+                            resolve([]);
+                        }
+                    },
+                    onerror: () => resolve([])
+                });
+            });
+        }
+
+        function showHistoryModal(username, history) {
+            const existing = document.getElementById('uh-modal');
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.id = 'uh-modal';
+            overlay.style.cssText = `
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.6); z-index: 999999;
+                display: flex; align-items: center; justify-content: center;
+                backdrop-filter: blur(2px);
+            `;
+
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                background: var(--tp-card, #fff); border-radius: 12px;
+                width: 480px; max-width: 90%; max-height: 80vh;
+                overflow: hidden; display: flex; flex-direction: column;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+                border: 1px solid var(--tp-border, #ddd);
+            `;
+
+            const header = document.createElement('div');
+            header.style.cssText = `
+                padding: 16px; border-bottom: 1px solid var(--tp-border, #e0e0e0);
+                display: flex; justify-content: space-between; align-items: center;
+                background: var(--tp-card-raised, #f5f5f5);
+            `;
+            header.innerHTML = `
+                <span style="font-weight: 700; font-size: 16px;">📜 Username history: ${escapeHTML(username)}</span>
+                <button id="uh-close" style="background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
+            `;
+
+            const body = document.createElement('div');
+            body.style.cssText = `
+                flex: 1; overflow-y: auto; padding: 12px 16px;
+            `;
+
+            if (history.length === 0) {
+                body.innerHTML = '<div style="text-align:center; padding: 20px; color:#888;">No previous usernames found.</div>';
+            } else {
+                const table = document.createElement('table');
+                table.style.cssText = 'width:100%; border-collapse: collapse; font-size:13px;';
+                table.innerHTML = `
+                    <thead>
+                        <tr style="border-bottom: 1px solid var(--tp-border, #ddd);">
+                            <th style="text-align:left; padding:8px 4px;">Username</th>
+                            <th style="text-align:left; padding:8px 4px;">Changed date</th>
+                        </table>
+                    </thead>
+                    <tbody id="uh-tbody"></tbody>
+                `;
+                const tbody = table.querySelector('#uh-tbody');
+                for (const entry of history) {
+                    const row = document.createElement('tr');
+                    row.style.borderBottom = '1px solid var(--tp-border-light, #eee)';
+                    const nameCell = document.createElement('td');
+                    nameCell.style.padding = '8px 4px';
+                    nameCell.textContent = entry.name;
+                    const dateCell = document.createElement('td');
+                    dateCell.style.padding = '8px 4px';
+                    dateCell.style.color = '#888';
+                    const date = entry.created ? new Date(entry.created).toLocaleDateString() : '?';
+                    dateCell.textContent = date;
+                    row.appendChild(nameCell);
+                    row.appendChild(dateCell);
+                    tbody.appendChild(row);
+                }
+                body.appendChild(table);
+            }
+
+            modal.appendChild(header);
+            modal.appendChild(body);
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            const closeBtn = overlay.querySelector('#uh-close');
+            const closeModal = () => overlay.remove();
+            closeBtn.addEventListener('click', closeModal);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+        }
+
+        async function addHistoryButton() {
+            if (!location.pathname.match(/\/users\/\d+\/profile/)) return;
+            const userId = location.pathname.match(/\/users\/(\d+)\/profile/)[1];
+            if (!userId) return;
+
+            let usernameEl = document.querySelector('h2[class*="username"], .profile-header h2, .buv-username');
+            if (!usernameEl) return;
+            const username = usernameEl.textContent.trim().replace(/[^a-zA-Z0-9_]/g, '');
+
+            if (document.getElementById('uh-history-btn')) return;
+
+            const btn = document.createElement('button');
+            btn.id = 'uh-history-btn';
+            btn.innerHTML = 'Name history';
+            btn.style.cssText = `
+                font-size: 11px;
+                padding: 2px 8px;
+                margin-left: 12px;
+                background: #111;
+                border: 1px solid #333;
+                border-radius: 16px;
+                color: #e0e0e0;
+                cursor: pointer;
+                font-weight: 500;
+                transition: 0.15s;
+                vertical-align: middle;
+                line-height: 1.4;
+            `;
+            btn.onmouseenter = () => btn.style.background = '#333';
+            btn.onmouseleave = () => btn.style.background = '#111';
+            btn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                btn.disabled = true;
+                btn.textContent = 'Loading...';
+                const history = await fetchUsernameHistory(userId);
+                showHistoryModal(username, history);
+                btn.disabled = false;
+                btn.innerHTML = 'Name history';
+            });
+            usernameEl.appendChild(btn);
+        }
+
+        function initHistory() {
+            addHistoryButton();
+            const observer = new MutationObserver(() => {
+                if (location.pathname.match(/\/users\/\d+\/profile/)) addHistoryButton();
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+            window.addEventListener('popstate', () => setTimeout(addHistoryButton, 500));
+            const pushState = history.pushState;
+            history.pushState = function() {
+                pushState.apply(this, arguments);
+                setTimeout(addHistoryButton, 500);
+            };
+        }
+
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initHistory);
+        else initHistory();
+    })();
+
+// ============================================================
+// #29 — Custom Trade Sound (свой MP3, удаляемая кнопка)
+// ============================================================
+(function() {
+    // Проверяем, включена ли функция через панель FrooExp
+    if (!extEnabled(29)) return;
+
+    // Регистрация в глобальных структурах (чтобы тумблер появился)
+    if (typeof EXT_META !== 'undefined' && !EXT_META[29]) {
+        EXT_META[29] = 'Trade Sound';
+    }
+    if (typeof SECTIONS !== 'undefined') {
+        let uiSection = SECTIONS.find(s => s.id === 'ui');
+        if (uiSection && !uiSection.exts.includes(29)) {
+            uiSection.exts.push(29);
+        }
+    }
+    if (typeof EXT_LABELS !== 'undefined' && !EXT_LABELS[29]) {
+        EXT_LABELS[29] = 'Trade Sound';
+    }
+
+    const CUSTOM_SOUND_KEY = 'frooexp_custom_trade_sound_v2';
+    let customSoundUrl = null;
+    let seenTradeIds = new Set();
+    let pollInterval = null;
+    let soundWindow = null;
+    let sidebarButton = null; // ссылка на кнопку в сайдбаре
+
+    // Загрузка сохранённого звука
+    function loadCustomSound() {
+        try {
+            customSoundUrl = GM_getValue(CUSTOM_SOUND_KEY, null);
+        } catch(e) {}
+    }
+    loadCustomSound();
+
+    function saveCustomSound(url) {
+        customSoundUrl = url;
+        GM_setValue(CUSTOM_SOUND_KEY, url);
+    }
+
+    function playCustomSound() {
+        if (!customSoundUrl) return;
+        try {
+            const audio = new Audio(customSoundUrl);
+            audio.volume = 0.7;
+            audio.play().catch(e => console.warn('[TradeSound] Play failed', e));
+        } catch(e) {
+            console.error('[TradeSound] Error', e);
+        }
+    }
+
+    async function fetchInboundTrades() {
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: 'https://froot.club/apisite/trades/v1/trades/inbound?limit=50',
+                withCredentials: true,
+                headers: { 'Accept': 'application/json' },
+                onload: function(r) {
+                    try {
+                        const data = JSON.parse(r.responseText);
+                        resolve(data.data || []);
+                    } catch(e) {
+                        resolve([]);
+                    }
+                },
+                onerror: () => resolve([])
+            });
+        });
+    }
+
+    async function checkNewTrades() {
+        const trades = await fetchInboundTrades();
+        const currentIds = new Set(trades.map(t => t.id));
+        const newTrades = trades.filter(t => !seenTradeIds.has(t.id));
+        if (newTrades.length > 0) {
+            console.log(`[TradeSound] New trade(s): ${newTrades.length}`);
+            playCustomSound();
+        }
+        seenTradeIds = currentIds;
+    }
+
+    function startPolling() {
+        if (pollInterval) clearInterval(pollInterval);
+        checkNewTrades();
+        pollInterval = setInterval(checkNewTrades, 5000);
+    }
+    function stopPolling() {
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
+    }
+
+    // --- Создание/удаление кнопки в сайдбаре ---
+    function createSidebarButton() {
+        if (!extEnabled(29)) return null;
+        if (sidebarButton) return sidebarButton;
+        const sidebar = document.querySelector('div[class*="card"]');
+        if (!sidebar) return null;
+        const homeBtn = [...sidebar.querySelectorAll('a')].find(a => a.textContent.trim() === 'Home');
+        if (!homeBtn) return null;
+        const btn = homeBtn.cloneNode(true);
+        btn.id = 'custom-sound-sidebar-btn';
+        btn.href = 'javascript:void(0)';
+        const iconSpan = document.createElement('span');
+        iconSpan.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-right:4px;vertical-align:middle;flex-shrink:0;opacity:0.85';
+        iconSpan.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>';
+        const existingIcon = btn.querySelector('svg, span[class*="icon"]');
+        if (existingIcon) existingIcon.replaceWith(iconSpan);
+        else btn.prepend(iconSpan);
+        const textSpan = [...btn.querySelectorAll('*')].find(el => el.children.length === 0 && el.textContent.trim() !== '');
+        if (textSpan) textSpan.textContent = 'Trade Sound';
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            createDraggableSoundWindow();
+        });
+        const upgradeBtn = [...sidebar.querySelectorAll('a')].find(a => a.textContent.includes('Upgrade'));
+        if (upgradeBtn) sidebar.insertBefore(btn, upgradeBtn);
+        else sidebar.appendChild(btn);
+        sidebarButton = btn;
+        console.log('[TradeSound] Sidebar button added');
+        return btn;
+    }
+
+    function removeSidebarButton() {
+        if (sidebarButton) {
+            sidebarButton.remove();
+            sidebarButton = null;
+            console.log('[TradeSound] Sidebar button removed');
+        }
+        const existing = document.getElementById('custom-sound-sidebar-btn');
+        if (existing) existing.remove();
+    }
+
+    // --- Передвижное окно (без изменений) ---
+    function createDraggableSoundWindow() {
+        if (soundWindow) {
+            soundWindow.closest('.ts-overlay')?.remove();
+            soundWindow = null;
+        }
+        const overlay = document.createElement('div');
+        overlay.className = 'ts-overlay';
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 999991; display: flex;
+            align-items: center; justify-content: center; backdrop-filter: blur(2px);
+        `;
+        const win = document.createElement('div');
+        win.className = 'ts-window';
+        win.style.cssText = `
+            width: 380px; background: #1e1e2e; border-radius: 12px;
+            border: 1px solid #333; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            display: flex; flex-direction: column; overflow: hidden;
+            font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        `;
+        const header = document.createElement('div');
+        header.style.cssText = `
+            padding: 12px 16px; background: #2a2a3d; border-bottom: 1px solid #333;
+            display: flex; justify-content: space-between; align-items: center;
+            cursor: move; user-select: none;
+        `;
+        header.innerHTML = `
+            <span style="font-weight: 700; font-size: 14px;">🔊 Custom Trade Sound</span>
+            <button class="ts-close" style="background: none; border: none; font-size: 22px; cursor: pointer; color: #aaa;">&times;</button>
+        `;
+        const body = document.createElement('div');
+        body.style.cssText = 'padding: 16px;';
+        body.innerHTML = `
+            <div style="margin-bottom: 12px;">
+                <label style="display: block; margin-bottom: 6px; font-size: 12px;">MP3 URL (http/https):</label>
+                <input type="text" id="ts-url-input" placeholder="https://example.com/sound.mp3" style="width: 100%; padding: 8px; background: #111; border: 1px solid #333; color: #fff; border-radius: 6px; font-size: 12px;" value="${customSoundUrl || ''}">
+            </div>
+            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                <button id="ts-set-url" style="flex:1; background: #4f8ef7; border: none; padding: 8px; border-radius: 6px; color: #fff; cursor: pointer;">Set from URL</button>
+                <button id="ts-upload" style="flex:1; background: #555; border: none; padding: 8px; border-radius: 6px; color: #fff; cursor: pointer;">Upload MP3</button>
+                <button id="ts-test" style="flex:1; background: #888; border: none; padding: 8px; border-radius: 6px; color: #fff; cursor: pointer;">Test</button>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button id="ts-reset" style="flex:1; background: #ff4444; border: none; padding: 8px; border-radius: 6px; color: #fff; cursor: pointer;">Reset to default</button>
+                <button id="ts-close-bottom" style="flex:1; background: #333; border: none; padding: 8px; border-radius: 6px; color: #fff; cursor: pointer;">Close</button>
+            </div>
+            <input type="file" id="ts-file" accept="audio/mpeg,audio/mp3" style="display:none;">
+            <div id="ts-status" style="margin-top: 12px; font-size: 11px; color: #aaa; text-align: center;"></div>
+        `;
+        win.appendChild(header);
+        win.appendChild(body);
+        overlay.appendChild(win);
+        document.body.appendChild(overlay);
+        soundWindow = win;
+
+        const close = () => overlay.remove();
+        header.querySelector('.ts-close').addEventListener('click', close);
+        body.querySelector('#ts-close-bottom').addEventListener('click', close);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+        let offsetX, offsetY, isDragging = false;
+        header.addEventListener('mousedown', (e) => {
+            if (e.target === header.querySelector('.ts-close')) return;
+            isDragging = true;
+            const rect = win.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            win.style.transition = 'none';
+            e.preventDefault();
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            let left = e.clientX - offsetX;
+            let top = e.clientY - offsetY;
+            left = Math.min(Math.max(left, 10), window.innerWidth - win.offsetWidth - 10);
+            top = Math.min(Math.max(top, 10), window.innerHeight - win.offsetHeight - 10);
+            win.style.position = 'fixed';
+            win.style.left = left + 'px';
+            win.style.top = top + 'px';
+            win.style.right = 'auto';
+            win.style.bottom = 'auto';
+            win.style.margin = '0';
+        });
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+            win.style.transition = '';
+        });
+
+        const urlInput = document.getElementById('ts-url-input');
+        const setUrlBtn = document.getElementById('ts-set-url');
+        const uploadBtn = document.getElementById('ts-upload');
+        const testBtn = document.getElementById('ts-test');
+        const resetBtn = document.getElementById('ts-reset');
+        const fileInput = document.getElementById('ts-file');
+        const statusDiv = document.getElementById('ts-status');
+
+        function setStatus(msg, isError = false) {
+            statusDiv.textContent = msg;
+            statusDiv.style.color = isError ? '#ff8888' : '#88ff88';
+            setTimeout(() => { if (statusDiv.textContent === msg) statusDiv.textContent = ''; }, 3000);
+        }
+
+        setUrlBtn.addEventListener('click', () => {
+            let url = urlInput.value.trim();
+            if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+                saveCustomSound(url);
+                setStatus('✓ URL saved');
+            } else {
+                setStatus('✗ Enter valid HTTP/HTTPS URL', true);
+            }
+        });
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file && file.type === 'audio/mpeg') {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const dataUrl = ev.target.result;
+                    saveCustomSound(dataUrl);
+                    urlInput.value = dataUrl.substring(0, 60) + '…';
+                    setStatus('✓ MP3 uploaded');
+                };
+                reader.readAsDataURL(file);
+            } else {
+                setStatus('✗ Please select MP3 file', true);
+            }
+        });
+        testBtn.addEventListener('click', () => {
+            if (customSoundUrl) {
+                const audio = new Audio(customSoundUrl);
+                audio.volume = 0.7;
+                audio.play().catch(e => setStatus('✗ Cannot play: ' + e.message, true));
+            } else {
+                setStatus('✗ No custom sound set', true);
+            }
+        });
+        resetBtn.addEventListener('click', () => {
+            saveCustomSound(null);
+            urlInput.value = '';
+            setStatus('✓ Custom sound removed');
+        });
+    }
+
+    // --- Следим за изменением состояния фичи (чтобы убирать/добавлять кнопку) ---
+    function watchFeatureToggle() {
+        // Перехватываем изменение localStorage для ключа korone_ext_29
+        const originalSetItem = localStorage.setItem;
+        localStorage.setItem = function(key, value) {
+            originalSetItem.apply(this, arguments);
+            if (key === 'korone_ext_29') {
+                const isEnabled = value === 'true';
+                if (!isEnabled) {
+                    removeSidebarButton();
+                    stopPolling();
+                } else {
+                    createSidebarButton();
+                    startPolling();
+                }
+            }
+        };
+        // Также наблюдаем за панелью, чтобы при переключении через интерфейс сработало
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'korone_ext_29') {
+                const isEnabled = e.newValue === 'true';
+                if (!isEnabled) {
+                    removeSidebarButton();
+                    stopPolling();
+                } else {
+                    createSidebarButton();
+                    startPolling();
+                }
+            }
+        });
+    }
+
+    // --- Инициализация ---
+    function init() {
+        watchFeatureToggle();
+        if (extEnabled(29)) {
+            createSidebarButton();
+            startPolling();
+        } else {
+            removeSidebarButton();
+            stopPolling();
+        }
+        // На случай, если сайдбар появится позже
+        const observer = new MutationObserver(() => {
+            if (extEnabled(29) && !sidebarButton) {
+                createSidebarButton();
+            } else if (!extEnabled(29) && sidebarButton) {
+                removeSidebarButton();
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
+
+// ============================================================
+// #30 — Highlight Own Items (подсветка своих предметов в чужом инвентаре)
+// ============================================================
+(function() {
+    if (!extEnabled(30)) return;
+
+    // Регистрация
+    if (typeof EXT_META !== 'undefined' && !EXT_META[30]) {
+        EXT_META[30] = 'Highlight Own Items';
+    }
+    if (typeof SECTIONS !== 'undefined') {
+        let catalogSection = SECTIONS.find(s => s.id === 'catalog');
+        if (catalogSection && !catalogSection.exts.includes(30)) {
+            catalogSection.exts.push(30);
+        }
+    }
+    if (typeof EXT_LABELS !== 'undefined' && !EXT_LABELS[30]) {
+        EXT_LABELS[30] = 'Highlight Own Items';
+    }
+    if (typeof extEnabled !== 'undefined' && typeof localStorage !== 'undefined') {
+        if (localStorage.getItem('korone_ext_30') === null) {
+            localStorage.setItem('korone_ext_30', 'true');
+        }
+    }
+
+    let myInventoryIds = new Set();
+    let isFetching = false;
+
+    // Получение своего инвентаря (ID всех предметов)
+    async function fetchMyInventory() {
+        if (isFetching) return;
+        isFetching = true;
+        try {
+            const resp = await fetch('https://froot.club/apisite/inventory/v1/users/authenticated/assets/collectibles?limit=100', { credentials: 'include' });
+            const data = await resp.json();
+            if (data.data) {
+                data.data.forEach(item => myInventoryIds.add(item.assetId));
+                // Пагинация: можно добавить цикл, но для простоты первые 100
+            }
+        } catch(e) {
+            console.error('[HighlightOwn] Failed to fetch inventory', e);
+        }
+        isFetching = false;
+    }
+
+    // Подсветка предметов на странице инвентаря другого пользователя
+    function highlightOwnItems() {
+        if (!location.pathname.includes('/inventory') && !location.pathname.includes('/collectibles')) return;
+        // Ищем карточки предметов
+        const cards = document.querySelectorAll('.col-6.col-md-4.col-lg-2.mb-2, [class*="itemCard"]');
+        cards.forEach(card => {
+            const link = card.querySelector('a[href*="/catalog/"]');
+            if (!link) return;
+            const match = link.href.match(/\/catalog\/(\d+)/);
+            if (!match) return;
+            const assetId = parseInt(match[1], 10);
+            if (myInventoryIds.has(assetId)) {
+                card.style.border = '2px solid #4ade80';
+                card.style.borderRadius = '8px';
+                card.style.boxShadow = '0 0 8px rgba(74,222,128,0.5)';
+            }
+        });
+    }
+
+    async function init() {
+        await fetchMyInventory();
+        highlightOwnItems();
+        const observer = new MutationObserver(() => highlightOwnItems());
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+})();
+
+// ============================================================
+// #31 — Price Discount (скидка относительно средней цены за неделю)
+// ============================================================
+(function() {
+    if (!extEnabled(32)) return;
+
+    if (typeof EXT_META !== 'undefined' && !EXT_META[32]) {
+        EXT_META[32] = 'Price Discount';
+    }
+    if (typeof SECTIONS !== 'undefined') {
+        let catalogSection = SECTIONS.find(s => s.id === 'catalog');
+        if (catalogSection && !catalogSection.exts.includes(32)) {
+            catalogSection.exts.push(32);
+        }
+    }
+    if (typeof EXT_LABELS !== 'undefined' && !EXT_LABELS[32]) {
+        EXT_LABELS[32] = 'Price Discount';
+    }
+    if (typeof extEnabled !== 'undefined' && typeof localStorage !== 'undefined') {
+        if (localStorage.getItem('korone_ext_32') === null) {
+            localStorage.setItem('korone_ext_32', 'true');
+        }
+    }
+
+    // Кэш средних цен (assetId -> avgPrice)
+    let avgPriceCache = new Map();
+    let loadingCache = new Set();
+
+    async function fetchWeeklyAverage(assetId) {
+        if (avgPriceCache.has(assetId)) return avgPriceCache.get(assetId);
+        if (loadingCache.has(assetId)) return null;
+        loadingCache.add(assetId);
+        try {
+            // Пробуем получить данные из koromons (там есть поле Trend или средняя цена)
+            // Альтернатива – можно рассчитать самим, но используем готовое API
+            const response = await fetch(`https://koromons.xyz/api/items/${assetId}`);
+            if (response.ok) {
+                const data = await response.json();
+                let avg = null;
+                if (data.weeklyAverage) avg = data.weeklyAverage;
+                else if (data.averagePrice) avg = data.averagePrice;
+                else if (data.Trend && data.Trend.average) avg = data.Trend.average;
+                if (avg !== null) {
+                    avgPriceCache.set(assetId, avg);
+                    return avg;
+                }
+            }
+            // Запасной вариант – вычисляем по RAP (недельный RAP)
+            const rapResp = await fetch(`https://froot.club/apisite/economy/v1/assets/${assetId}/details`);
+            if (rapResp.ok) {
+                const details = await rapResp.json();
+                const rap = details.recentAveragePrice || details.price || 0;
+                // Для простоты используем RAP как среднюю (недельная средняя часто близка к RAP)
+                if (rap > 0) {
+                    avgPriceCache.set(assetId, rap);
+                    return rap;
+                }
+            }
+            return null;
+        } catch(e) {
+            console.warn('[PriceDiscount] Failed to fetch avg for', assetId, e);
+            return null;
+        } finally {
+            loadingCache.delete(assetId);
+        }
+    }
+
+    async function injectDiscount() {
+        const match = location.pathname.match(/\/catalog\/(\d+)/);
+        if (!match) return;
+        const assetId = match[1];
+
+        // Ищем элемент с ценой
+        const priceEl = document.querySelector('[class*="priceLabel"], .priceLabel-0-2-61, [class*="price"]');
+        if (!priceEl) return;
+
+        // Уже добавлен дисконт?
+        if (document.getElementById('pd-discount')) return;
+
+        const priceText = priceEl.textContent.trim();
+        const currentPrice = parseInt(priceText.replace(/[^0-9]/g, ''), 10);
+        if (isNaN(currentPrice) || currentPrice === 0) return;
+
+        const avgPrice = await fetchWeeklyAverage(assetId);
+        if (!avgPrice || avgPrice === 0) return;
+
+        const diff = currentPrice - avgPrice;
+        const percent = ((diff / avgPrice) * 100).toFixed(1);
+        const isDiscount = diff < 0;
+
+        const discountSpan = document.createElement('div');
+        discountSpan.id = 'pd-discount';
+        discountSpan.style.cssText = `
+            font-size: 13px;
+            margin-top: 4px;
+            color: ${isDiscount ? '#4ade80' : '#f87171'};
+            font-weight: 500;
+            background: rgba(0,0,0,0.05);
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 16px;
+        `;
+        if (isDiscount) {
+            discountSpan.innerHTML = `📉 ${Math.abs(percent)}% below weekly avg (${avgPrice.toLocaleString()} R$)`;
+        } else {
+            discountSpan.innerHTML = `📈 +${percent}% above weekly avg (${avgPrice.toLocaleString()} R$)`;
+        }
+
+        // Вставляем после цены
+        priceEl.parentElement.insertBefore(discountSpan, priceEl.nextSibling);
+    }
+
+    function init() {
+        if (!location.pathname.includes('/catalog/')) return;
+        setTimeout(injectDiscount, 1000);
+        const observer = new MutationObserver(() => {
+            if (!document.getElementById('pd-discount')) injectDiscount();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+    const pushState = history.pushState;
+    history.pushState = function() {
+        pushState.apply(this, arguments);
+        setTimeout(init, 500);
+    };
+    window.addEventListener('popstate', () => setTimeout(init, 500));
+})();
+
+    // ============================================================
     // Звук и эффект капли при загрузке
     // ============================================================
     (function() {
@@ -4312,6 +5826,9 @@ kbH +
             }, 800);
         });
     })();
+
+    // Load initial whitelist/blacklist
+    loadBlackWhitelist();
 
     // Обновление списка пользователей для админ-панели
     updateUserList();
