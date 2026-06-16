@@ -28,7 +28,7 @@
 // @connect      *
 // @require      https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js
 // @run-at       document-idle
-// @icon         https://files.catbox.moe/zzhtwi.png
+// @icon         https://files.catbox.moe/bkk1kg.png
 // ==/UserScript==
 
 (function () {
