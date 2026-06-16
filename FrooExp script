@@ -1,18 +1,18 @@
 // ==UserScript==
-// @name         FrooExp
+// @name         SakuraExp
 // @namespace    https://tampermonkey.net/
-// @version      3.1
-// @description  FrooExp – complete toolkit for froot.club (modern navbar style + donor panel + trade price check + whitelist/blacklist + trading lounge)
-// @author       fluouliss
-// @match        *://froot.club/*
+// @version      1.0
+// @description  Полный набор инструментов для sakura.mba – современная панель в стиле сакуры + донат-панель + проверка цены трейда + вайтлист/блеклист + трейд-лаунж
+// @author       fluouliss (141)
+// @match        *://sakura.mba/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_notification
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_cookie
-// @connect      froot.club
-// @connect      www.froot.club
+// @connect      sakura.mba
+// @connect      www.sakura.mba
 // @connect      koromons.xyz
 // @connect      files.catbox.moe
 // @connect      economy.roblox.com
@@ -36,9 +36,120 @@
     'use strict';
 
     // ============================================================
+    //  Флаг для однократного воспроизведения звука и эффекта капли
+    // ============================================================
+    const DROP_PLAYED_KEY = 'sakura_drop_played';
+    function hasDropPlayed() {
+        try {
+            return localStorage.getItem(DROP_PLAYED_KEY) === 'true';
+        } catch(e) { return false; }
+    }
+    function setDropPlayed() {
+        try {
+            localStorage.setItem(DROP_PLAYED_KEY, 'true');
+        } catch(e) {}
+    }
+
+    if (!hasDropPlayed()) {
+        // Звук капли
+        const audio = new Audio('https://files.catbox.moe/xxxcm4.mp3');
+        audio.volume = 0.7;
+        audio.play().catch(e => console.log('Drop sound error:', e));
+        // Эффект расходящейся волны
+        const rippleDiv = document.createElement('div');
+        rippleDiv.id = 'sakura-ripple';
+        rippleDiv.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 999999; background: radial-gradient(circle at 50% 50%, rgba(255,182,193,0.5) 0%, rgba(255,182,193,0) 80%); opacity: 0; transition: opacity 0.8s ease-out;`;
+        document.body.appendChild(rippleDiv);
+        requestAnimationFrame(() => {
+            rippleDiv.style.opacity = '0.7';
+            setTimeout(() => {
+                rippleDiv.style.opacity = '0';
+                setTimeout(() => rippleDiv.remove(), 1000);
+            }, 800);
+        });
+        setDropPlayed();
+    }
+
+    // ============================================================
+    //  Анимация расцветающей сакуры при открытии панели (НАВБАР МЕНЮ)
+    // ============================================================
+    function createSakuraAnimation() {
+        // Удаляем старый контейнер, если есть
+        const oldContainer = document.getElementById('sakura-bloom-container');
+        if (oldContainer) oldContainer.remove();
+
+        const container = document.createElement('div');
+        container.id = 'sakura-bloom-container';
+        container.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 999999;
+            overflow: hidden;
+        `;
+        document.body.appendChild(container);
+
+        const petalCount = 45; // количество лепестков
+        for (let i = 0; i < petalCount; i++) {
+            const petal = document.createElement('div');
+            petal.classList.add('sakura-petal');
+            // Случайные параметры
+            const size = Math.random() * 18 + 8; // 8-26px
+            const left = Math.random() * 100; // % от ширины экрана
+            const duration = Math.random() * 4 + 3; // 3-7 секунд
+            const delay = Math.random() * 2; // 0-2 сек задержка
+            const rotateStart = Math.random() * 360;
+            const rotateEnd = rotateStart + (Math.random() * 360 + 180);
+            petal.style.cssText = `
+                position: absolute;
+                bottom: -20px;
+                left: ${left}%;
+                width: ${size}px;
+                height: ${size}px;
+                background: #ffb7c5;
+                opacity: 0.9;
+                border-radius: 50% 0 50% 50%;
+                transform: rotate(${rotateStart}deg);
+                animation: sakuraFloat ${duration}s ease-in ${delay}s forwards;
+                filter: blur(0.3px);
+                box-shadow: 0 0 2px rgba(255,105,180,0.5);
+            `;
+            // Добавляем уникальный keyframe в голову, если его ещё нет
+            if (!document.querySelector('#sakura-keyframe-style')) {
+                const style = document.createElement('style');
+                style.id = 'sakura-keyframe-style';
+                style.textContent = `
+                    @keyframes sakuraFloat {
+                        0% {
+                            transform: translateY(0) rotate(0deg);
+                            opacity: 0.9;
+                        }
+                        70% {
+                            opacity: 0.8;
+                        }
+                        100% {
+                            transform: translateY(-110vh) rotate(${rotateEnd}deg);
+                            opacity: 0;
+                        }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+            container.appendChild(petal);
+        }
+
+        // Удалить контейнер через 6 секунд после последнего лепестка
+        setTimeout(() => {
+            if (container && container.parentNode) container.remove();
+        }, 7000);
+    }
+
+    // ============================================================
     // Extension Manager — общая конфигурация (сохранение состояния)
     // ============================================================
-
     const EXT_META = {
         1:  'Faster User Search',
         2:  'Better My Friends',
@@ -65,10 +176,10 @@
         26: 'Trading Lounge',
         27: 'Auto Buyer',
         28: 'Username History',
-        29: 'Custom Trade Sound',
-        30: 'Owned Highlighter',
-        31: 'Discount Display',
-        32: 'PIN Protection'
+        29: 'Owned Highlighter',
+        30: 'Discount Display',
+        31: 'Limited Items Notifier',
+        33: ''
     };
 
     function extEnabled(n) {
@@ -87,7 +198,7 @@
         return new Promise((resolve) => {
             GM_xmlhttpRequest({
                 method: 'GET',
-                url: 'https://froot.club/apisite/users/v1/users/authenticated',
+                url: 'https://sakura.mba/apisite/users/v1/users/authenticated',
                 withCredentials: true,
                 headers: { 'Accept': 'application/json' },
                 onload: function(r) {
@@ -152,9 +263,9 @@
         div.className = 'korone-section-header';
         div.style.cursor = 'default';
         div.style.padding = '8px 14px';
-        div.style.background = 'rgba(0,0,0,0.02)';
+        div.style.background = 'rgba(255,182,193,0.08)';
         div.innerHTML = `
-            <span class="korone-section-label" style="color:#fb923c;">Admin Panel</span>
+            <span class="korone-section-label" style="color:#e84393;">Admin Panel</span>
             <span style="color:#888;font-size:10px;">${userList.length} users</span>
         `;
         const body = document.createElement('div');
@@ -243,9 +354,9 @@
         div.className = 'korone-section-header';
         div.style.cursor = 'default';
         div.style.padding = '8px 14px';
-        div.style.background = 'rgba(0,0,0,0.02)';
+        div.style.background = 'rgba(255,182,193,0.08)';
         div.innerHTML = `
-            <span class="korone-section-label" style="color:#4f8ef7;">Whitelist / Blacklist</span>
+            <span class="korone-section-label" style="color:#e84393;">Whitelist / Blacklist</span>
             <span style="color:#888;font-size:10px;">${blacklist.size} blacklisted, ${whitelist.size} whitelisted</span>
         `;
         const body = document.createElement('div');
@@ -363,7 +474,7 @@
     }).observe(document.body, { childList: true, subtree: true });
 
     // ============================================================
-    // TRADE PRICE CHECK & SCAM DETECTION (Feature #24)
+    // TRADE PRICE CHECK & SCAM DETECTION
     // ============================================================
     if (extEnabled(24)) {
         (function() {
@@ -585,12 +696,12 @@ fill="none" stroke="currentColor" stroke-width="2">
 </svg>`;
 
     const SECTIONS = [
-        { id: 'ui', label: 'UI & SIDEBAR', color: '#a78bfa', exts: [12, 20] },
-        { id: 'trading', label: 'TRADING', color: '#4f8ef7', exts: [17, 21, 23, 24] },
-        { id: 'social', label: 'SOCIAL', color: '#52c97a', exts: [1, 2, 7, 16, 22, 25, 26] },  // добавлен 26
-        { id: 'catalog', label: 'CATALOG & ITEMS', color: '#f59e42', exts: [8, 9, 10, 14, 15] },
-        { id: 'avatar', label: 'AVATAR & WARDROBE', color: '#f472b6', exts: [6, 13] },
-        { id: 'development', label: 'DEVELOPMENT', color: '#fb7185', exts: [4, 5, 11, 19] },
+        { id: 'ui', label: 'UI & SIDEBAR', color: '#ff9eb5', exts: [12, 20] },
+        { id: 'trading', label: 'TRADING', color: '#ff7b9c', exts: [17, 21, 23, 24] },
+        { id: 'social', label: 'SOCIAL', color: '#f06292', exts: [1, 2, 7, 16, 22, 25, 26] },
+        { id: 'catalog', label: 'CATALOG & ITEMS', color: '#e84393', exts: [8, 9, 10, 14, 15] },
+        { id: 'avatar', label: 'AVATAR & WARDROBE', color: '#ff80ab', exts: [6, 13] },
+        { id: 'development', label: 'DEVELOPMENT', color: '#ff4081', exts: [4, 5, 11, 19] },
     ];
     const EXT_LABELS = Object.assign({20: 'Collapse Sidebar', 24: 'Trade Price Check', 25: 'Whitelist/Blacklist', 26: 'Trading Lounge'}, Object.fromEntries(Object.entries(EXT_META).map(([k,v])=>[+k,v])));
 
@@ -648,275 +759,272 @@ fill="none" stroke="currentColor" stroke-width="2">
         }
     }
 
+    // =============================================
+    // СТИЛИ ПАНЕЛИ В ТЕМАТИКЕ САКУРЫ
+    // =============================================
     const style = document.createElement('style');
     style.textContent = `
-#korone-ext-btn {
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    width:40px;
-    height:40px;
-    cursor:pointer;
-    color:#fff;
-    border:none;
-    background:transparent;
-    flex-shrink:0;
-    transition:0.15s ease;
-    position:relative;
-    margin-right:10px;
-    padding:0;
-}
-
-#korone-ext-btn svg {
-    width:26px;
-    height:26px;
-}
-
-#korone-ext-btn:hover {
-    background:rgba(255,255,255,0.08);
-}
-
-#korone-ext-btn.korone-active {
-    background:rgba(255,255,255,0.12);
-    color:#fff;
-}
-
-#korone-ext-overlay {
-    display:none;
-    position:fixed;
-    inset:0;
-    z-index:99998;
-}
-
-#korone-ext-overlay.open {
-    display:block;
-}
-
-#korone-ext-panel {
-    display:none;
-    position:fixed;
-    background:#ffffff;
-    border:1px solid #d8d8d8;
-    border-radius:0px;
-    box-shadow:none;
-    z-index:99999;
-    width:280px;
-    padding:0;
-    font-family:Arial,sans-serif;
-    overflow:hidden;
-}
-
-#korone-ext-panel.open {
-    display:block;
-}
-
-#korone-ext-panel-header {
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:12px;
-    border-bottom:1px solid #e5e5e5;
-    background:#fff;
-}
-
-#korone-ext-panel-title {
-    font-size:13px;
-    font-weight:700;
-    text-transform:uppercase;
-    color:#111;
-    letter-spacing:0.5px;
-}
-
-#korone-ext-panel-user {
-    display:flex;
-    align-items:center;
-    gap:8px;
-}
-
-#korone-ext-panel-avatar {
-    width:24px;
-    height:24px;
-    border-radius:0px;
-    object-fit:cover;
-    border:1px solid #ddd;
-}
-
-#korone-ext-panel-username {
-    font-size:12px;
-    font-weight:600;
-    color:#222;
-}
-
-#korone-ext-rows {
-    padding:4px 0;
-    max-height:400px;
-    overflow-y:auto;
-    background:#fff;
-}
-
-.korone-section-header {
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:10px 14px;
-    cursor:pointer;
-    user-select:none;
-    border-bottom:1px solid #efefef;
-    background:#fafafa;
-}
-
-.korone-section-header:hover {
-    background:#f2f2f2;
-}
-
-.korone-section-label {
-    font-size:11px;
-    font-weight:700;
-    text-transform:uppercase;
-    color:#111 !important;
-    letter-spacing:0.6px;
-}
-
-.korone-section-chevron {
-    color:#666;
-    display:flex;
-    align-items:center;
-}
-
-.korone-section-body {
-    overflow:hidden;
-}
-
-.korone-ext-row {
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:10px 14px;
-    gap:10px;
-    transition:0.1s;
-    border-bottom:1px solid #f1f1f1;
-}
-
-.korone-ext-row:hover {
-    background:#f8f8f8;
-}
-
-.korone-ext-num {
-    font-size:11px;
-    font-weight:700;
-    color:#999;
-    min-width:18px;
-}
-
-.korone-ext-label {
-    font-size:13px;
-    color:#111;
-    flex:1;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    font-weight:500;
-}
-
-.korone-ext-label.off {
-    color:#999;
-}
-
-.korone-ext-toggle {
-    width:36px;
-    height:18px;
-    border-radius:0px;
-    border:none;
-    cursor:pointer;
-    position:relative;
-    transition:0.15s;
-}
-
-.korone-ext-toggle::after {
-    content:'';
-    position:absolute;
-    top:2px;
-    left:2px;
-    width:14px;
-    height:14px;
-    background:#fff;
-    transition:0.15s;
-    border-radius:0px;
-}
-
-.korone-ext-toggle.on {
-    background:#111;
-}
-
-.korone-ext-toggle.off {
-    background:#cfcfcf;
-}
-
-.korone-ext-toggle.on::after {
-    left:20px;
-}
-
-#korone-ext-footer {
-    border-top:1px solid #e5e5e5;
-    padding:10px 14px;
-    background:#fafafa;
-    display:flex;
-    align-items:center;
-    gap:8px;
-}
-
-#korone-ext-footer-dot {
-    width:6px;
-    height:6px;
-    background:#111;
-}
-
-#korone-ext-footer-text {
-    font-size:11px;
-    color:#666;
-    flex:1;
-}
-
-#korone-ext-reload {
-    font-size:11px;
-    font-weight:600;
-    padding:5px 10px;
-    border:1px solid #d0d0d0;
-    background:#fff;
-    color:#111;
-    cursor:pointer;
-    border-radius:0px;
-}
-
-#korone-ext-reload:hover {
-    background:#f2f2f2;
-}
-
-#korone-sidebar-collapse-btn {
-    position:fixed;
-    bottom:24px;
-    left:0;
-    width:34px;
-    height:30px;
-    background:#fff;
-    border:1px solid #d0d0d0;
-    border-left:none;
-    border-radius:0;
-    cursor:pointer;
-    display:none;
-    align-items:center;
-    justify-content:center;
-    z-index:9999;
-    color:#111;
-}
-
-#korone-sidebar-collapse-btn.sb-visible {
-    display:flex;
-}
-
-#korone-sidebar-collapse-btn:hover {
-    background:#f3f3f3;
-}
+    /* Общие стили панели расширения — стиль сакуры */
+    #korone-ext-btn {
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        width:40px;
+        height:40px;
+        cursor:pointer;
+        color:#fff;
+        border:none;
+        background:transparent;
+        flex-shrink:0;
+        transition:0.15s ease;
+        position:relative;
+        margin-right:10px;
+        padding:0;
+    }
+    #korone-ext-btn svg {
+        width:26px;
+        height:26px;
+    }
+    #korone-ext-btn:hover {
+        background:rgba(255,182,193,0.2);
+    }
+    #korone-ext-btn.korone-active {
+        background:rgba(255,105,180,0.25);
+        color:#ffb7c5;
+    }
+    #korone-ext-overlay {
+        display:none;
+        position:fixed;
+        inset:0;
+        z-index:99998;
+    }
+    #korone-ext-overlay.open {
+        display:block;
+    }
+    #korone-ext-panel {
+        display:none;
+        position:fixed;
+        background: linear-gradient(145deg, #fff9fb 0%, #ffeef4 100%);
+        border:1px solid #ffb7c5;
+        border-radius:32px 16px 32px 16px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.2), 0 0 0 1px rgba(255,182,193,0.3);
+        z-index:99999;
+        width:280px;
+        padding:0;
+        font-family:'Segoe UI', 'Roboto', 'Noto Sans JP', sans-serif;
+        overflow:hidden;
+        backdrop-filter: blur(2px);
+    }
+    #korone-ext-panel.open {
+        display:block;
+    }
+    #korone-ext-panel-header {
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        padding:12px 16px;
+        background: rgba(255,240,245,0.95);
+        border-bottom: 1px solid #ffd9e6;
+        position:relative;
+    }
+    #korone-ext-panel-header::before {
+        content: "🌸";
+        position: absolute;
+        left: -10px;
+        top: -8px;
+        font-size: 28px;
+        opacity: 0.5;
+        transform: rotate(-15deg);
+        pointer-events: none;
+    }
+    #korone-ext-panel-header::after {
+        content: "🌸";
+        position: absolute;
+        right: -8px;
+        bottom: -8px;
+        font-size: 28px;
+        opacity: 0.4;
+        transform: rotate(10deg);
+        pointer-events: none;
+    }
+    #korone-ext-panel-title {
+        font-size:13px;
+        font-weight:700;
+        text-transform:uppercase;
+        color:#d81b60;
+        letter-spacing:1px;
+        text-shadow: 0 1px 0 #fff;
+    }
+    #korone-ext-panel-user {
+        display:flex;
+        align-items:center;
+        gap:8px;
+    }
+    #korone-ext-panel-avatar {
+        width:24px;
+        height:24px;
+        border-radius:50%;
+        object-fit:cover;
+        border:1px solid #ffb6c1;
+    }
+    #korone-ext-panel-username {
+        font-size:12px;
+        font-weight:600;
+        color:#c2185b;
+    }
+    #korone-ext-rows {
+        padding:4px 0;
+        max-height:400px;
+        overflow-y:auto;
+        background:#fffafc;
+    }
+    .korone-section-header {
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        padding:10px 14px;
+        cursor:pointer;
+        user-select:none;
+        border-bottom:1px solid #ffe0e8;
+        background:#fff5f9;
+        font-weight:600;
+    }
+    .korone-section-header:hover {
+        background:#ffeef4;
+    }
+    .korone-section-label {
+        font-size:11px;
+        font-weight:800;
+        text-transform:uppercase;
+        letter-spacing:0.8px;
+        color:#d81b60 !important;
+    }
+    .korone-section-chevron {
+        color:#f06292;
+        display:flex;
+        align-items:center;
+    }
+    .korone-section-body {
+        overflow:hidden;
+        background:#ffffffc9;
+    }
+    .korone-ext-row {
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        padding:10px 14px;
+        gap:10px;
+        transition:0.1s;
+        border-bottom:1px solid #ffecf0;
+    }
+    .korone-ext-row:hover {
+        background:#fff0f5;
+    }
+    .korone-ext-num {
+        font-size:11px;
+        font-weight:700;
+        color:#f48fb1;
+        min-width:18px;
+    }
+    .korone-ext-label {
+        font-size:13px;
+        color:#4a2c2f;
+        flex:1;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        font-weight:500;
+    }
+    .korone-ext-label.off {
+        color:#b0a0a5;
+    }
+    .korone-ext-toggle {
+        width:36px;
+        height:18px;
+        border-radius:20px;
+        border:none;
+        cursor:pointer;
+        position:relative;
+        transition:0.15s;
+        background:#ffcdd2;
+    }
+    .korone-ext-toggle::after {
+        content:'';
+        position:absolute;
+        top:2px;
+        left:2px;
+        width:14px;
+        height:14px;
+        background:#fff;
+        transition:0.15s;
+        border-radius:50%;
+        box-shadow:0 1px 2px rgba(0,0,0,0.2);
+    }
+    .korone-ext-toggle.on {
+        background:#e91e63;
+    }
+    .korone-ext-toggle.off {
+        background:#ffb6c1;
+    }
+    .korone-ext-toggle.on::after {
+        left:20px;
+    }
+    #korone-ext-footer {
+        border-top:1px solid #ffd9e6;
+        padding:10px 14px;
+        background:#fff5f9;
+        display:flex;
+        align-items:center;
+        gap:8px;
+    }
+    #korone-ext-footer-dot {
+        width:6px;
+        height:6px;
+        background:#e91e63;
+        border-radius:50%;
+    }
+    #korone-ext-footer-text {
+        font-size:11px;
+        color:#b56a7c;
+        flex:1;
+    }
+    #korone-ext-reload {
+        font-size:11px;
+        font-weight:600;
+        padding:5px 10px;
+        border:1px solid #e91e63;
+        background:#fff;
+        color:#c2185b;
+        cursor:pointer;
+        border-radius:30px;
+        transition:0.15s;
+    }
+    #korone-ext-reload:hover {
+        background:#fce4ec;
+    }
+    #korone-sidebar-collapse-btn {
+        position:fixed;
+        bottom:24px;
+        left:0;
+        width:34px;
+        height:30px;
+        background:#fff;
+        border:1px solid #d0d0d0;
+        border-left:none;
+        border-radius:0 12px 12px 0;
+        cursor:pointer;
+        display:none;
+        align-items:center;
+        justify-content:center;
+        z-index:9999;
+        color:#111;
+    }
+    #korone-sidebar-collapse-btn.sb-visible {
+        display:flex;
+    }
+    #korone-sidebar-collapse-btn:hover {
+        background:#fdeff2;
+    }
     `;
     document.head.appendChild(style);
 
@@ -945,7 +1053,7 @@ fill="none" stroke="currentColor" stroke-width="2">
         const wrap = document.createElement('div');
         wrap.style.cssText = 'position:relative;display:flex;align-items:center;';
         const btn = document.createElement('button');
-        btn.id = 'korone-ext-btn'; btn.title = 'FrooExp';
+        btn.id = 'korone-ext-btn'; btn.title = 'SakuraExp';
         btn.innerHTML = ICON_SVG;
         const overlay = document.createElement('div');
         overlay.id = 'korone-ext-overlay';
@@ -954,10 +1062,10 @@ fill="none" stroke="currentColor" stroke-width="2">
 
         const hdr = document.createElement('div');
         hdr.id = 'korone-ext-panel-header';
-        hdr.innerHTML = `<span id="korone-ext-panel-title">FrooExp</span><div id="korone-ext-panel-user"><img id="korone-ext-panel-avatar" src="" alt=""/><span id="korone-ext-panel-username">Hi, ...</span></div>`;
+        hdr.innerHTML = `<span id="korone-ext-panel-title">SAKURA EXP</span><div id="korone-ext-panel-user"><img id="korone-ext-panel-avatar" src="" alt=""/><span id="korone-ext-panel-username">Hi, ...</span></div>`;
         panel.appendChild(hdr);
 
-        GM_xmlhttpRequest({method:'GET',url:'https://froot.club/apisite/users/v1/users/authenticated',withCredentials:true,headers:{Accept:'application/json'},onload:function(r){try{const d=JSON.parse(r.responseText);const uid=d.id,uname=d.displayName||d.name||'';document.getElementById('korone-ext-panel-username').textContent='Hi, '+uname;if(uid){GM_xmlhttpRequest({method:'GET',url:'https://froot.club/apisite/thumbnails/v1/users/avatar-headshot?userIds='+uid+'&size=48x48&format=Png',withCredentials:true,headers:{Accept:'application/json'},onload:function(r2){try{const d2=JSON.parse(r2.responseText);const imgUrl=(d2.data&&d2.data[0]&&d2.data[0].imageUrl)||'';if(imgUrl){const av=document.getElementById('korone-ext-panel-avatar');if(av)av.src=imgUrl;}}catch{}},onerror:function(){}});}}catch{}}});
+        GM_xmlhttpRequest({method:'GET',url:'https://sakura.mba/apisite/users/v1/users/authenticated',withCredentials:true,headers:{Accept:'application/json'},onload:function(r){try{const d=JSON.parse(r.responseText);const uid=d.id,uname=d.displayName||d.name||'';document.getElementById('korone-ext-panel-username').textContent='Hi, '+uname;if(uid){GM_xmlhttpRequest({method:'GET',url:'https://sakura.mba/apisite/thumbnails/v1/users/avatar-headshot?userIds='+uid+'&size=48x48&format=Png',withCredentials:true,headers:{Accept:'application/json'},onload:function(r2){try{const d2=JSON.parse(r2.responseText);const imgUrl=(d2.data&&d2.data[0]&&d2.data[0].imageUrl)||'';if(imgUrl){const av=document.getElementById('korone-ext-panel-avatar');if(av)av.src=imgUrl;}}catch{}},onerror:function(){}});}}catch{}}});
 
         const rows = document.createElement('div');
         rows.id = 'korone-ext-rows';
@@ -1072,6 +1180,8 @@ fill="none" stroke="currentColor" stroke-width="2">
             panel.querySelectorAll('.korone-section-body').forEach(b => {
                 if (b.style.maxHeight !== '0px') b.style.maxHeight = b.scrollHeight + 'px';
             });
+            // ✨ ЗАПУСК АНИМАЦИИ РАСЦВЕТАЮЩЕЙ САКУРЫ
+            createSakuraAnimation();
         }
         function closePanel() {
             panel.classList.remove('open');
@@ -1135,11 +1245,11 @@ fill="none" stroke="currentColor" stroke-width="2">
     }
 
     // ============================================================
-    // #1 — Faster User Search (работает только для froot.club)
+    // #1 — Faster User Search (работает только для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(1)) return;
-        const BASE = 'https://froot.club';
+        const BASE = 'https://sakura.mba';
         const FALLBACK_IMG = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==';
         let csrfToken = '';
         let currentQuery = '';
@@ -1301,11 +1411,11 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #2 — Better My Friends (адаптирован для froot.club)
+    // #2 — Better My Friends (адаптирован для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(2)) return;
-        const BASE = 'https://froot.club';
+        const BASE = 'https://sakura.mba';
         let csrfToken = '';
         const detailsCache = {}, staffCache = {}, headshotCache = {};
         let PAGE_USER_ID = null;
@@ -1345,7 +1455,7 @@ fill="none" stroke="currentColor" stroke-width="2">
                 selBg:'#fef0ef', selBorder:'#dc3545', banBg:'#fdf5f4', banBorder:'#e8c4c0', banName:'#bbb', banBadge:'#dc3545',
                 pageBg:'#f5f5f5', pageActive:'#ddd', pageBorder:'#ddd', stRed:'#dc3545', stBlue:'#1a73e8',
                 progBg:'#e0e0e0', progBar:'#dc3545', ufColor:'#dc3545', ufBorder:'rgba(220,53,69,0.3)',
-                accColor:'#28a745', accBorder:'rgba(40,167,69,0.3)', selectBg:'#fff', divider:'#eee', shadow:'rgba(0,0,0,0.06)',
+                accColor:'#28a745', accBorder:'rgba(40,167,69,0.4)', selectBg:'#fff', divider:'#eee', shadow:'rgba(0,0,0,0.06)',
             };
         }
 
@@ -1607,7 +1717,7 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #4 — Enhanced Place Settings (cooper) - domain adapted
+    // #4 — Enhanced Place Settings (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(4)) return;
@@ -1782,14 +1892,14 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #5 — Asset Downloader (cooper) - domain adapted
+    // #5 — Asset Downloader (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(5)) return;
         function extractAssetId(){const url=window.location.href;let m=url.match(/[?&]id=(\d+)/);if(m)return m[1];m=url.match(/\/(library|catalog)\/(\d+)/);if(m)return m[2];return null;}
         function isTargetPage(){return /\/(asset|library|catalog)(\/|\?|$)/.test(window.location.pathname);}
-        function getAssetUrl(id,sourceUrl){return sourceUrl.includes('froot.club')?`https://froot.club/library/${id}/-`:`https://create.roblox.com/store/asset/${id}/-`;}
-        function getDetailsUrl(id,sourceUrl){return sourceUrl.includes('froot.club')?`https://froot.club/marketplace/productinfo?AssetId=${id}`:`https://economy.roblox.com/v2/assets/${id}/details`;}
+        function getAssetUrl(id,sourceUrl){return sourceUrl.includes('sakura.mba')?`https://sakura.mba/library/${id}/-`:`https://create.roblox.com/store/asset/${id}/-`;}
+        function getDetailsUrl(id,sourceUrl){return sourceUrl.includes('sakura.mba')?`https://sakura.mba/marketplace/productinfo?AssetId=${id}`:`https://economy.roblox.com/v2/assets/${id}/details`;}
 
         const ASSET_TYPE_NAMES={1:'Image',2:'T-Shirt',3:'Audio',4:'Mesh',5:'Lua',8:'Hat',9:'Place',10:'Model',11:'Shirt',12:'Pants',13:'Decal',17:'Head',18:'Face',19:'Gear',21:'Badge',24:'Animation',34:'Plugin',38:'MeshPart',40:'MeshHiddenSurfaceRemoval',42:'ClothingAccessory',43:'HairAccessory',44:'FaceAccessory',45:'NeckAccessory',46:'ShoulderAccessory',47:'FrontAccessory',48:'BackAccessory',49:'WaistAccessory',62:'Video',77:'DynamicHead'};
 
@@ -1812,7 +1922,7 @@ fill="none" stroke="currentColor" stroke-width="2">
             if(bytesMatch(bytes,0,0x66,0x4C,0x61,0x43))return'.flac';
             if(bytesMatch(bytes,4,0x66,0x74,0x79,0x70)){const brand=String.fromCharCode(bytes[8],bytes[9],bytes[10],bytes[11]);return /M4A /i.test(brand)?'.m4a':'.mp4';}
             if(bytesMatch(bytes,0,0x1A,0x45,0xDF,0xA3))return'.webm';
-            if(bytesMatch(bytes,0,0x67,0x6C,0x54,0x46))return'.glb';
+            if(bytesMatch(bytes,0,0x67,0x6C,0x74,0x46))return'.glb';
             if(/^\s*\{.*"asset"/s.test(textPreview))return'.gltf';
             if(/<COLLADA/i.test(textPreview))return'.dae';
             if(/^(#[^\n]*\n|)(mtllib|usemtl|v |vn |vt |f |g |o )/.test(textPreview))return'.obj';
@@ -1923,7 +2033,7 @@ fill="none" stroke="currentColor" stroke-width="2">
 
         function viewAssets(assetId){
             showLoadingPanel();
-            GM_xmlhttpRequest({method:'GET',url:`https://froot.club/asset/?id=${assetId}`,responseType:'arraybuffer',onload:function(response){const buffer=response.response;if(response.status<200||response.status>=300){const bodyText=new TextDecoder().decode(buffer.byteLength<4096?buffer:buffer.slice(0,4096));showPanelError('Server returned '+response.status);return;}if(!buffer||buffer.byteLength===0){showPanelError('Empty response from server');return;}const fullText=new TextDecoder().decode(buffer);if(!isRbxmx(fullText.substring(0,4096))){showPanelError('Asset is not an rbxmx model — no referenced assets to extract.');return;}renderAdPanel(extractRbxmxAssets(fullText));},onerror:()=>showPanelError('Network error or request blocked'),ontimeout:()=>showPanelError('Request timed out')});
+            GM_xmlhttpRequest({method:'GET',url:`https://sakura.mba/asset/?id=${assetId}`,responseType:'arraybuffer',onload:function(response){const buffer=response.response;if(response.status<200||response.status>=300){const bodyText=new TextDecoder().decode(buffer.byteLength<4096?buffer:buffer.slice(0,4096));showPanelError('Server returned '+response.status);return;}if(!buffer||buffer.byteLength===0){showPanelError('Empty response from server');return;}const fullText=new TextDecoder().decode(buffer);if(!isRbxmx(fullText.substring(0,4096))){showPanelError('Asset is not an rbxmx model — no referenced assets to extract.');return;}renderAdPanel(extractRbxmxAssets(fullText));},onerror:()=>showPanelError('Network error or request blocked'),ontimeout:()=>showPanelError('Request timed out')});
         }
 
         function adShowToast(message,type='error'){document.getElementById('pekora-dl-toast')?.remove();const toast=document.createElement('div');toast.id='pekora-dl-toast';const bg=type==='error'?'#ef4444':'#18181b';toast.style.cssText=`position:fixed;bottom:24px;right:24px;z-index:999999;padding:12px 16px;border-radius:8px;font-size:13px;font-weight:500;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#fff;background:${bg};box-shadow:0 8px 24px rgba(0,0,0,0.15);opacity:1;transition:all 0.3s ease;pointer-events:none;max-width:340px;word-break:break-word;display:flex;align-items:center;gap:8px;`;toast.innerHTML=`<span style="display:flex;align-items:center;flex-shrink:0;">${type==='error'?AD_ICONS.error:AD_ICONS.check}</span><span>${message}</span>`;document.body.appendChild(toast);setTimeout(()=>{toast.style.opacity='0';toast.style.transform='translateY(8px)';setTimeout(()=>toast.remove(),300);},4000);}
@@ -1934,7 +2044,7 @@ fill="none" stroke="currentColor" stroke-width="2">
 
         function downloadAsset(assetId){
             setButtonState('Fetching…');
-            GM_xmlhttpRequest({method:'GET',url:`https://froot.club/asset/?id=${assetId}`,responseType:'arraybuffer',onload:function(response){const buffer=response.response;const bodyText=new TextDecoder().decode(buffer.byteLength<4096?buffer:buffer.slice(0,4096));if(response.status<200||response.status>=300){setButtonState('Download');adShowToast(`Download failed — server returned ${response.status}`,'error');return;}if(!buffer||buffer.byteLength===0){setButtonState('Download');adShowToast('Download failed — empty response','error');return;}const ext=detectExtension(buffer,bodyText);try{let blob,filename;if(ext==='.mesh'){const rbxmx=wrapMeshAsRbxmx(buffer,assetId);blob=new Blob([rbxmx],{type:'text/xml'});filename=`asset_${assetId}.rbxmx`;}else{blob=new Blob([buffer]);filename=`asset_${assetId}${ext}`;}triggerDownload(blob,filename);setButtonState('Download');adShowToast(`Downloaded: ${filename}`,'success');}catch(err){setButtonState('Download');adShowToast(`Download failed — ${err.message}`,'error');}},onerror:()=>{setButtonState('Download');adShowToast('Download failed — network error','error');},ontimeout:()=>{setButtonState('Download');adShowToast('Download failed — request timed out','error');}});
+            GM_xmlhttpRequest({method:'GET',url:`https://sakura.mba/asset/?id=${assetId}`,responseType:'arraybuffer',onload:function(response){const buffer=response.response;const bodyText=new TextDecoder().decode(buffer.byteLength<4096?buffer:buffer.slice(0,4096));if(response.status<200||response.status>=300){setButtonState('Download');adShowToast(`Download failed — server returned ${response.status}`,'error');return;}if(!buffer||buffer.byteLength===0){setButtonState('Download');adShowToast('Download failed — empty response','error');return;}const ext=detectExtension(buffer,bodyText);try{let blob,filename;if(ext==='.mesh'){const rbxmx=wrapMeshAsRbxmx(buffer,assetId);blob=new Blob([rbxmx],{type:'text/xml'});filename=`asset_${assetId}.rbxmx`;}else{blob=new Blob([buffer]);filename=`asset_${assetId}${ext}`;}triggerDownload(blob,filename);setButtonState('Download');adShowToast(`Downloaded: ${filename}`,'success');}catch(err){setButtonState('Download');adShowToast(`Download failed — ${err.message}`,'error');}},onerror:()=>{setButtonState('Download');adShowToast('Download failed — network error','error');},ontimeout:()=>{setButtonState('Download');adShowToast('Download failed — request timed out','error');}});
         }
 
         function injectAdButton(){
@@ -1964,7 +2074,7 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #6 — Avatar Editor Tweaks (x) - domain adapted
+    // #6 — Avatar Editor Tweaks (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(6)) return;
@@ -2028,7 +2138,7 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #7 — Rolify (x) - domain adapted
+    // #7 — Rolify (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(7)) return;
@@ -2123,7 +2233,7 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #8 — Old Collectibles Page (cooper) - domain adapted
+    // #8 — Old Collectibles Page (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(8)) return;
@@ -2132,7 +2242,7 @@ fill="none" stroke="currentColor" stroke-width="2">
         const pi=new URLSearchParams(location.search).get('pageIndex');if(pi&&pi!=='0'){location.href=`/internal/collectibles?userId=${userId}`;return;}
         const ocpEsc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML;};
 
-        const fetchAll=async()=>{let items=[],cursor='';do{const r=await new Promise((res,rej)=>GM_xmlhttpRequest({method:'GET',url:`https://froot.club/apisite/inventory/v1/users/${userId}/assets/collectibles?limit=100${cursor?'&cursor='+cursor:''}`,responseType:'json',onload:r=>res(r),onerror:rej}));const d=typeof r.response==='string'?JSON.parse(r.response):r.response;if(d?.data)items.push(...d.data);cursor=d?.nextPageCursor||'';}while(cursor);return items;};
+        const fetchAll=async()=>{let items=[],cursor='';do{const r=await new Promise((res,rej)=>GM_xmlhttpRequest({method:'GET',url:`https://sakura.mba/apisite/inventory/v1/users/${userId}/assets/collectibles?limit=100${cursor?'&cursor='+cursor:''}`,responseType:'json',onload:r=>res(r),onerror:rej}));const d=typeof r.response==='string'?JSON.parse(r.response):r.response;if(d?.data)items.push(...d.data);cursor=d?.nextPageCursor||'';}while(cursor);return items;};
 
         const serialColor=num=>{if(!num)return'#555';if(num===1)return'#ffd700';if(num<=5)return'#ff6b6b';if(num<=10)return'#ff922b';if(num<=25)return'#fcc419';if(num<=50)return'#51cf66';if(num<=100)return'#339af0';return'#aaa';};
 
@@ -2146,7 +2256,7 @@ fill="none" stroke="currentColor" stroke-width="2">
             const top=document.createElement('div');top.style.cssText='display:flex;align-items:center;gap:14px;margin-bottom:18px;';top.innerHTML=`<img src="${avatarSrc}" style="width:64px;height:64px;border-radius:50%;border:2px solid #333;background:#1a1a1a;"><div style="flex:1;"><div style="font-size:20px;font-weight:700;letter-spacing:-0.3px;">${ocpEsc(username)}</div><div style="font-size:13px;color:#888;margin-top:2px;">${items.length} items · ${totalRap.toLocaleString()} RAP</div></div>`;c.appendChild(top);
             const div1=document.createElement('div');div1.style.cssText='height:1px;background:#222;margin-bottom:16px;';c.appendChild(div1);
             const grid=document.createElement('div');grid.style.cssText='display:flex;flex-wrap:wrap;gap:10px;';grid.innerHTML=items.map(ssCard).join('');c.appendChild(grid);
-            const bot=document.createElement('div');bot.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid #222;';bot.innerHTML=`<div style="font-size:10px;color:#444;">froot.club</div><div style="font-size:10px;color:#444;">made by @cooper</div>`;c.appendChild(bot);
+            const bot=document.createElement('div');bot.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid #222;';bot.innerHTML=`<div style="font-size:10px;color:#444;">sakura.mba</div><div style="font-size:10px;color:#444;">made by @cooper</div>`;c.appendChild(bot);
             wrap.appendChild(c);
             const imgs=c.querySelectorAll('img');await Promise.all([...imgs].map(img=>img.complete?Promise.resolve():new Promise(r=>{img.onload=r;img.onerror=r;})));await new Promise(r=>setTimeout(r,300));
             try{const canvas=await html2canvas(c,{backgroundColor:'#111',useCORS:true,allowTaint:true,scale:1,logging:false,imageTimeout:10000});canvas.toBlob(blob=>{const a=document.createElement('a');a.download=`${username}_collectibles.png`;a.href=URL.createObjectURL(blob);a.click();URL.revokeObjectURL(a.href);},'image/png');}catch(e){console.error(e);alert('Screenshot failed.');}
@@ -2160,7 +2270,7 @@ fill="none" stroke="currentColor" stroke-width="2">
             const btn=document.createElement('button');btn.className='btn btn-outline-light btn-sm mt-2';btn.style.cssText='display:block;width:100%;';btn.innerHTML='📸 Screenshot';
             btn.onclick=async()=>{btn.disabled=true;btn.innerHTML='⏳ Capturing...';await doScreenshot(items,totalRap,username,avatarSrc);btn.disabled=false;btn.innerHTML='📸 Screenshot';};
             container.appendChild(btn);
-            const credit=document.createElement('a');credit.href='https://froot.club/users/51543/profile';credit.target='_blank';credit.style.cssText='display:block;text-align:center;font-size:11px;color:#666;margin-top:6px;text-decoration:none;';credit.textContent='made by @cooper';credit.onmouseenter=()=>credit.style.color='#aaa';credit.onmouseleave=()=>credit.style.color='#666';container.appendChild(credit);
+            const credit=document.createElement('a');credit.href='https://sakura.mba/users/51543/profile';credit.target='_blank';credit.style.cssText='display:block;text-align:center;font-size:11px;color:#666;margin-top:6px;text-decoration:none;';credit.textContent='made by @cooper';credit.onmouseenter=()=>credit.style.color='#aaa';credit.onmouseleave=()=>credit.style.color='#666';container.appendChild(credit);
         };
 
         (async()=>{
@@ -2171,7 +2281,7 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #9 — Better Details (cooper) - domain adapted
+    // #9 — Better Details (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(9)) return;
@@ -2181,7 +2291,7 @@ fill="none" stroke="currentColor" stroke-width="2">
         const bdFind=n=>[...document.querySelectorAll('span[class*="attrLabel"]')].find(e=>e.textContent.trim()===n);
         function bdRun(){
             let id=(location.pathname.match(/\/catalog\/(\d+)/)||[])[1];if(!id)return;
-            GM_xmlhttpRequest({method:'POST',url:'https://froot.club/apisite/catalog/v1/catalog/items/details',headers:{'Content-Type':'application/json'},data:JSON.stringify({items:[{itemType:'Asset',id:+id}]}),onload:r=>{
+            GM_xmlhttpRequest({method:'POST',url:'https://sakura.mba/apisite/catalog/v1/catalog/items/details',headers:{'Content-Type':'application/json'},data:JSON.stringify({items:[{itemType:'Asset',id:+id}]}),onload:r=>{
                 let item=JSON.parse(r.responseText)?.data?.[0];if(!item)return;
                 let t=0,iv=setInterval(()=>{
                     if(++t>30)return clearInterval(iv);
@@ -2198,7 +2308,7 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #10 — Better Profile (cooper) - domain adapted
+    // #10 — Better Profile (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(10)) return;
@@ -2220,8 +2330,8 @@ fill="none" stroke="currentColor" stroke-width="2">
         function bpFmtLastOnline(dateString){const date=new Date(dateString),diff=Math.floor((Date.now()-date)/1000);let relative;if(diff<60)relative='just now';else if(diff<3600){const m=Math.floor(diff/60);relative=m+' min'+(m!==1?'s':'')+' ago';}else if(diff<86400){const h=Math.floor(diff/3600);relative=h+' hour'+(h!==1?'s':'')+' ago';}else if(diff<2592000){const d=Math.floor(diff/86400);relative=d+' day'+(d!==1?'s':'')+' ago';}else relative=date.toLocaleDateString('en-US');return{relative,absolute:date.toLocaleString('en-US')};}
 
         function bpFetchData(userId){
-            GM_xmlhttpRequest({method:'POST',url:'https://froot.club/apisite/presence/v1/presence/users',headers:{'Content-Type':'application/json'},data:JSON.stringify({userIds:[userId]}),onload:function(response){try{bpPresenceData=JSON.parse(response.responseText);bpTryInject();}catch(e){}}});
-            fetch(`https://froot.club/Game/LuaWebService/HandleSocialRequest.ashx?method=isingroup&playerid=${userId}&groupid=1200769`,{credentials:'include'}).then(r=>r.text()).then(text=>{bpStaffResult=text.includes('>true<');bpTryInject();}).catch(()=>{bpStaffResult=false;bpTryInject();});
+            GM_xmlhttpRequest({method:'POST',url:'https://sakura.mba/apisite/presence/v1/presence/users',headers:{'Content-Type':'application/json'},data:JSON.stringify({userIds:[userId]}),onload:function(response){try{bpPresenceData=JSON.parse(response.responseText);bpTryInject();}catch(e){}}});
+            fetch(`https://sakura.mba/Game/LuaWebService/HandleSocialRequest.ashx?method=isingroup&playerid=${userId}&groupid=1200769`,{credentials:'include'}).then(r=>r.text()).then(text=>{bpStaffResult=text.includes('>true<');bpTryInject();}).catch(()=>{bpStaffResult=false;bpTryInject();});
         }
 
         function bpTryInject(){
@@ -2241,7 +2351,7 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #11 — API Purchase (pythonplugin) - domain adapted
+    // #11 — API Purchase (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(11)) return;
@@ -2254,7 +2364,7 @@ fill="none" stroke="currentColor" stroke-width="2">
 
         const apNotify=(msg,ok=true)=>{const toast=document.createElement('div');toast.textContent=msg;toast.style.cssText=`position:fixed;bottom:-60px;right:20px;z-index:9999;background:${ok?'rgba(0,167,107,0.95)':'rgba(195,66,66,0.95)'};backdrop-filter:blur(6px);color:white;padding:12px 18px;border-radius:8px;border:1px solid ${ok?'#009963':'#9b2f2f'};font-family:"Gotham SSm A","Helvetica Neue",Helvetica,Arial,sans-serif;font-size:13px;font-weight:500;letter-spacing:0.2px;box-shadow:0 4px 10px rgba(0,0,0,0.25);transition:bottom 0.5s ease,opacity 0.4s ease;opacity:0;text-transform:lowercase;`;document.body.appendChild(toast);setTimeout(()=>{toast.style.bottom='30px';toast.style.opacity='1';},50);setTimeout(()=>{toast.style.bottom='-60px';toast.style.opacity='0';setTimeout(()=>toast.remove(),600);},3500);};
 
-        const purchase=async(id,price=0)=>{const csrf=getApCsrf();try{const res=await fetch(`https://froot.club/apisite/economy/v1/purchases/products/${id}`,{method:'POST',mode:'same-origin',credentials:'include',headers:{'accept':'application/json, text/plain, */*','content-type':'application/json;charset=UTF-8','x-csrf-token':csrf,'referer':location.href,'origin':'https://froot.club'},body:JSON.stringify({assetId:parseInt(id),expectedPrice:price,expectedSellerId:getSellerId(),expectedCurrency:1,userAssetId:null})});const text=await res.text();let data={};try{data=JSON.parse(text);}catch{}if(res.ok&&data.purchased){apNotify('purchase successful');setTimeout(()=>location.reload(),1500);}else{apNotify(`failed: ${data.reason||text}`,false);}}catch(err){apNotify(`failed: ${err.message}`,false);}};
+        const purchase=async(id,price=0)=>{const csrf=getApCsrf();try{const res=await fetch(`https://sakura.mba/apisite/economy/v1/purchases/products/${id}`,{method:'POST',mode:'same-origin',credentials:'include',headers:{'accept':'application/json, text/plain, */*','content-type':'application/json;charset=UTF-8','x-csrf-token':csrf,'referer':location.href,'origin':'https://sakura.mba'},body:JSON.stringify({assetId:parseInt(id),expectedPrice:price,expectedSellerId:getSellerId(),expectedCurrency:1,userAssetId:null})});const text=await res.text();let data={};try{data=JSON.parse(text);}catch{}if(res.ok&&data.purchased){apNotify('purchase successful');setTimeout(()=>location.reload(),1500);}else{apNotify(`failed: ${data.reason||text}`,false);}}catch(err){apNotify(`failed: ${err.message}`,false);}};
 
         const purchase_button=()=>{const id=getItemId();if(!id)return false;if(document.querySelector('#bypbtn'))return true;const buyButton=document.querySelector('button.newBuyButton-0-2-58')||document.querySelector('button[class*="newBuyButton"]')||document.querySelector('button[class*="buyBtn"]');if(!buyButton||buyButton.disabled||buyButton.textContent.toLowerCase().includes('edit avatar'))return false;const container=buyButton.parentElement;if(!container)return false;const btn=document.createElement('button');btn.id='bypbtn';btn.type='button';btn.textContent='api buy';btn.style.cssText=`background:rgb(0,167,107)!important;color:white!important;margin-top:6px;border:none;border-radius:6px;padding:8px 16px;font-family:"Gotham SSm A","Helvetica Neue",Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;cursor:pointer;width:100%;height:40px;text-transform:uppercase;letter-spacing:0.5px;transition:all 0.25s ease;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,0.2);`;btn.onclick=async(e)=>{e.preventDefault();if(btn.disabled)return;btn.disabled=true;btn.textContent='processing...';btn.style.background='#888!important';btn.style.cursor='not-allowed';btn.style.opacity='0.75';try{await purchase(getItemId(),getPrice());}finally{btn.disabled=false;btn.textContent='api buy';btn.style.background='rgb(0,167,107)!important';btn.style.cursor='pointer';btn.style.opacity='1';}};container.appendChild(btn);return true;};
 
@@ -2271,7 +2381,7 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #12 — Sidebar Buttons+ (с добавленными кнопками 2FA, My Limiteds и Support)
+    // #12 — Sidebar Buttons+ (с добавленными кнопками 2FA, My Limiteds и Support) — без изменений
     // ============================================================
     (function () {
         if (!extEnabled(12)) return;
@@ -2287,7 +2397,7 @@ fill="none" stroke="currentColor" stroke-width="2">
             if(!sidebar)return;if(sidebar.dataset.extraInjected==='true')return;sidebar.dataset.extraInjected='true';
             const homeBtn=[...sidebar.querySelectorAll('a')].find(a=>a.textContent.trim()==='Home');if(!homeBtn)return;
             const userId=sbGetUserId();
-            const links=[['2FA','/auth/2fa'],['My Limiteds',userId?`/internal/collectibles?userId=${userId}`:'#'],['Support','https://froot.club/catalog/1179/donate']];
+            const links=[['2FA','/auth/2fa'],['My Limiteds',userId?`/internal/collectibles?userId=${userId}`:'#'],['Support','https://sakura.mba/catalog/1179/donate']];
             const upgradeBtn=[...sidebar.querySelectorAll('a')].find(a=>a.textContent.includes('Upgrade'));
             links.forEach(([label,url])=>{
                 const newBtn=homeBtn.cloneNode(true);newBtn.href=url;
@@ -2308,11 +2418,11 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #13 — Wardrobe (cooper) - ИСПРАВЛЕНА ОШИБКА СОХРАНЕНИЯ АУТФИТОВ
+    // #13 — Wardrobe (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(13)) return;
-        const BASE             = 'https://froot.club';
+        const BASE             = 'https://sakura.mba';
         const API_AVATAR       = `${BASE}/apisite/avatar/v1/avatar`;
         const API_SET_WEARING  = `${BASE}/apisite/avatar/v1/avatar/set-wearing-assets`;
         const API_THUMBS       = `${BASE}/apisite/thumbnails/v1/assets`;
@@ -3114,11 +3224,12 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #14 — Catalog Item Value + Profile Value (без ссылки на Koromons) уже добавлен выше
+    // #14 — Catalog Item Value + Profile Value (уже адаптирован)
     // ============================================================
+    // (пусто, так как код уже был внутри)
 
     // ============================================================
-    // #15 — Collectibles Value - domain adapted
+    // #15 — Collectibles Value - domain adapted (уже адаптирован)
     // ============================================================
     (function () {
         if (!extEnabled(15)) return;
@@ -3319,13 +3430,13 @@ fill="none" stroke="currentColor" stroke-width="2">
     })();
 
     // ============================================================
-    // #16 — Banned Profile Overlay - domain adapted (без изменений)
+    // #16 — Banned Profile Overlay (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(16)) return;
         if (!/^\/users\/\d+\/profile/.test(location.pathname)) return;
 
-        var BASE = 'https://froot.club';
+        var BASE = 'https://sakura.mba';
         function api(path) { return fetch(BASE + path, { credentials: 'include' }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; }); }
         function getUserIdFromURL() { var m = location.pathname.match(/^\/users\/(\d+)\/profile/); return m ? m[1] : null; }
         function isBannedPage() {
@@ -3699,7 +3810,7 @@ kbH +
                 cont.innerHTML = '';
             }
             cont.innerHTML = '<div class="row"><div class="col-12"></div></div>' + html;
-            document.title = un + "'s Profile - Korone";
+            document.title = un + "'s Profile - Sakura";
 
             var tabAbout = cont.querySelector('#buv-tab-about');
             var tabCreations = cont.querySelector('#buv-tab-creations');
@@ -3771,12 +3882,12 @@ kbH +
     })();
 
     // ============================================================
-    // #17 — Trade Notifier (without mass trader) - adapted to use shared blacklist
+    // #17 — Trade Notifier (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(17)) return;
 
-        const BASE = 'https://froot.club';
+        const BASE = 'https://sakura.mba';
         const EP_INBOUND = BASE + '/apisite/trades/v1/trades/inbound';
         const EP_COUNT = BASE + '/apisite/trades/v1/trades/inbound/count';
         const EP_DETAIL = BASE + '/apisite/trades/v1/trades';
@@ -3833,16 +3944,14 @@ kbH +
         let panelOpen = false, panelTrades = [], panelDetails = {}, panelHeads = {};
         let assetThumbs = {}, csrfToken = null, pollTimer = null, creditsHeads = {};
 
-                function playSound() {
+        function playSound() {
             if (!settings.sound) return;
-            // Если есть кастомный звук из модуля #29 — используем его
             if (typeof window._tradeNotifierCustomPlaySound === 'function') {
                 window._tradeNotifierCustomPlaySound();
             } else {
-                // Старый стандартный звук
                 try {
                     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                    function beep(f, s, d, v) {const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(v, ctx.currentTime + s); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + s + d); o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime + s); o.stop(ctx.currentTime + s + d); } // ваш старый код
+                    function beep(f, s, d, v) {const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(v, ctx.currentTime + s); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + s + d); o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime + s); o.stop(ctx.currentTime + s + d); }
                     beep(880, 0, 0.15, 0.3);
                     beep(1100, 0.12, 0.15, 0.25);
                     beep(1320, 0.24, 0.2, 0.2);
@@ -4081,7 +4190,7 @@ kbH +
                 await apiPost(EP_DETAIL + '/' + tid + '/decline', {});
                 const trade = panelTrades.find(t => t.id === tid);
                 const username = trade ? trade.user.displayName : ('User #' + uid);
-                addToBlacklist(uid); // Use shared blacklist
+                addToBlacklist(uid);
                 setStatus(btn, 'as-ok', '\u2713 Blocked');
                 setTimeout(refreshPanel, 1200);
             }
@@ -4242,7 +4351,6 @@ kbH +
             p.id = 'rol-panel';
             p.className = 'rol-panel';
             const blockedEntries = Array.from(blacklist).map(uid => ({ userId: uid, username: 'User #' + uid }));
-            // try to fetch usernames
             if (blockedEntries.length) {
                 try {
                     const usersData = await apiGet(BASE + '/apisite/users/v1/users?userIds=' + blockedEntries.map(u=>u.userId).join(','), true);
@@ -4286,7 +4394,6 @@ kbH +
                 const uids = blockedEntries.map(u => u.userId);
                 const heads = await fetchHeads(uids);
                 Object.assign(panelHeads, heads);
-                // try to fetch usernames
                 try {
                     const usersData = await apiGet(BASE + '/apisite/users/v1/users?userIds=' + uids.join(','), true);
                     const users = usersData.data || [];
@@ -4420,7 +4527,7 @@ kbH +
     })();
 
     // ============================================================
-    // #19 — Import from Roblox (cooper) - domain adapted
+    // #19 — Import from Roblox (адаптировано для sakura.mba)
     // ============================================================
     (function () {
         if (!extEnabled(19)) return;
@@ -4450,16 +4557,16 @@ kbH +
     if (extEnabled(21)) (function() { 'use strict'; function createUI() { if (document.getElementById('pekora-calc-ui')) return; const box = document.createElement('div'); box.id = 'pekora-calc-ui'; box.style.cssText = 'position:fixed;bottom:20px;right:20px;width:220px;background:#111;color:#fff;padding:15px;border-radius:12px;z-index:10000;box-shadow:0 10px 30px rgba(0,0,0,0.7);font-family:sans-serif;border:1px solid #444;'; box.innerHTML = '<div style="font-weight:bold;margin-bottom:10px;text-align:center;color:#00d2ff;font-size:12px;">Korone Calculator</div><div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:14px;"><span>You:</span> <span id="calc-you" style="font-weight:bold;color:#ff5555;">0</span></div><div style="display:flex;justify-content:space-between;margin-bottom:10px;font-size:14px;"><span>Them:</span> <span id="calc-them" style="font-weight:bold;color:#55ff55;">0</span></div><div id="calc-res-box" style="background:#222;border-radius:6px;padding:8px;text-align:center;"><span id="calc-diff" style="font-weight:bold;font-size:14px;">$0</span></div>'; document.body.appendChild(box); } function update() { const elYou = document.getElementById('calc-you'); const elThem = document.getElementById('calc-them'); const elDiff = document.getElementById('calc-diff'); if (!elYou || !elThem || !elDiff) return; const headers = Array.from(document.querySelectorAll('div, span, h1, h2, h3, h4')).filter(el => el.innerText === "Your Offer" || el.innerText === "Your Request"); let yourOfferSection = null; let theirOfferSection = null; headers.forEach(h => { if (h.innerText === "Your Offer") yourOfferSection = h.parentElement; if (h.innerText === "Your Request") theirOfferSection = h.parentElement; }); let yourTotal = 0; let theirTotal = 0; if (yourOfferSection) { yourOfferSection.querySelectorAll("[class*='amount-']").forEach(tag => { yourTotal += parseInt(tag.innerText.replace(/[^0-9]/g, '')) || 0; }); } if (theirOfferSection) { theirOfferSection.querySelectorAll("[class*='amount-']").forEach(tag => { theirTotal += parseInt(tag.innerText.replace(/[^0-9]/g, '')) || 0; }); } if (yourTotal === 0 && theirTotal === 0) { const allTags = Array.from(document.querySelectorAll("[class*='amount-']")); if (allTags.length > 0) { const tradeRow = document.querySelector(".row-0-2-92"); const midY = tradeRow ? tradeRow.getBoundingClientRect().top + 150 : window.innerHeight / 2; allTags.forEach(tag => { const rect = tag.getBoundingClientRect(); const val = parseInt(tag.innerText.replace(/[^0-9]/g, '')) || 0; if (rect.top < midY) yourTotal += val; else theirTotal += val; }); } } elYou.innerText = yourTotal.toLocaleString(); elThem.innerText = theirTotal.toLocaleString(); const diff = theirTotal - yourTotal; if (yourTotal === 0 && theirTotal === 0) { elDiff.innerText = "Waiting for items..."; elDiff.style.color = "#888"; } else { const win = diff >= 0; elDiff.innerText = (win ? "WIN: +" : "LOSS: ") + Math.abs(diff).toLocaleString(); elDiff.style.color = win ? "#55ff55" : "#ff5555"; } } function tryInit() { if (!location.pathname.startsWith('/Trade/')) return; createUI(); } tryInit(); setInterval(update, 600); const _push = history.pushState.bind(history); const _replace = history.replaceState.bind(history); function onNav() { setTimeout(() => { if (location.pathname.startsWith('/Trade/')) { createUI(); } else { document.getElementById('pekora-calc-ui')?.remove(); } }, 100); } history.pushState = (...a) => { _push(...a); onNav(); }; history.replaceState = (...a) => { _replace(...a); onNav(); }; window.addEventListener('popstate', onNav); })();
 
     // ============================================================
-    // #22 — 2018 Users Search - domain adapted
+    // #22 — 2018 Users Search (адаптировано для sakura.mba)
     // ============================================================
-    if (extEnabled(22)) (function () { if (!location.pathname.startsWith('/search/users') && !location.href.includes('/search/users')) return; function run() { document.querySelector('.d-none')?.remove(); document.querySelectorAll('[class*="row-"]').forEach(item => { if (!item.classList.contains('flex')) return; if (item.querySelector('.ng-scope')) return; const searchText = document.querySelector('[class*="input"]')?.getAttribute('value') || new URLSearchParams(location.search).get('keyword') || ''; item.parentElement.style.width = '100%'; item.style.backgroundColor = '#E3E3E3'; item.innerHTML = `<div ng-include="'player-search-page'" class="ng-scope" style="width:100%;"><div class="top-row ng-scope"><h3 ng-if="!appMeta.isI18nEnabled" class="header ng-scope" style="display:flex;gap:5px;"><div style="font-weight:300;width:max-content;">Player Results for</div><span class="keyword ng-binding" style="font-weight:400;">${searchText}</span></h3><div class="search-container" style="margin:6px 0;"><div class="input-group" style="position:relative;display:table;clear:both;"><input class="form-control input-field ng-pristine ng-untouched ng-valid ng-not-empty" value="${searchText}" type="text" placeholder="Search" style="font-weight:300;font-size:16px;height:38px;padding:5px 12px;width:101%;border:1px solid #B8B8B8;border-radius:3px;outline:none;box-shadow:none;border-right:0;"><div class="input-group-btn" style="position:relative;display:table-cell;width:1%;vertical-align:middle;"><button class="input-addon-btn" style="background:#fff;border:1px solid #B8B8B8;border-left:0;border-radius:3px;box-shadow:none;height:38px;outline:none;"><span class="icon-search"></span></button></div></div></div><div class="row results-count ng-scope" style="display:flex;"><span class="text-secondary hideable ng-binding" style="width:max-content;padding-right:2px;font-size:12px;font-weight:400;color:#757575;">1 - 12 of</span><span class="text-secondary ng-binding" style="width:max-content;padding-left:0;font-size:12px;font-weight:400;color:#757575;">1 <ng-pluralize>Result</ng-pluralize></span></div></div><div class="col-xs-12 section-content-off no-results ng-binding ng-scope ng-hide" style="display:none;">There are no matches available for "${searchText}"</div><div class="col-xs-12 section-content-off no-results ng-binding ng-scope" style="display:${searchText.length < 3 ? 'block' : 'none'};">Please enter at least 3 characters.</div><div class="col-xs-12 section-content-off unsafe-input ng-scope ng-hide" style="display:none;">You have entered unsafe input. Please try your search again.</div><ul class="search-result avatar-cards ng-scope"></ul><div class="results-loading ng-scope" style="display:flex;flex-wrap:wrap;min-height:554.95px;align-content:flex-start;"><img class="spinner loading-default load-image" src="https://froot.club/img/loading.gif" style="width:80px;height:24px;vertical-align:middle;display:${searchText.length < 3 ? 'none' : 'block'};margin-top:10%;margin-left:calc(50% - 31px);"></div><div class="row ng-scope"><div class="rbx-pager"><ul class="pager" style="display:flex;justify-content:center;align-items:center;"><li class="pager-prev disabled" style="float:none;display:inline-block;vertical-align:top;list-style:none;margin:0;padding:0;"><a style="background-color:#FFF;margin-right:5px;"><span class="icon-left"></span></a></li><li class="pager-cur" style="list-style:none;vertical-align:middle;height:max-content;"><span id="rbx-current-page" class="ng-binding" style="font-weight:300;vertical-align:middle;">1</span></li><li class="pager-total" style="list-style:none;margin-left:2px;height:max-content;"><span style="font-weight:300;vertical-align:middle;">of</span><span class="ng-binding" style="font-weight:300;vertical-align:middle;">1</span></li><li class="pager-next" style="float:none;display:inline-block;vertical-align:top;list-style:none;margin:0 0 0 5px;"><a style="background-color:#FFF;"><span class="icon-right"></span></a></li></ul></div></div></div>`; const input = item.querySelector('.input-field'); if (input) { input.addEventListener('keydown', e => { if (e.key === 'Enter') location.href = 'https://froot.club/search/users?keyword=' + encodeURIComponent(input.value); }); } if (searchText.length > 2) { fetch(`https://froot.club/search/users/results?keyword=${encodeURIComponent(searchText)}&maxRows=12&startIndex=0`).then(r => r.json()).then(data => { const userId = Number(document.querySelector('[class*="nameLink"]')?.href?.match(/\/users\/(\d+)/)?.[1] || 0); const result = item.querySelector('.results-loading'); fetch(`https://froot.club/apisite/friends/v1/users/${userId}/friends/statuses?userIds=${(data.UserSearchResults || []).slice(0, 9).map(u => u.UserId).join(',')}`).then(r => r.json()).catch(() => ({})).then(friends => { result.innerHTML = ''; (data.UserSearchResults || []).slice(0, 9).forEach(rdata => { const relationship = friends?.data?.find(f => f.id === rdata.UserId) || {}; result.insertAdjacentHTML('afterbegin', `<li style="padding-left:0;width:33.3%;padding:0 5px 12px;list-style:none;"><div style="border-radius:3px;padding:0;background-color:#fff;position:relative;box-shadow:0 1px 4px 0 rgba(25,25,25,0.3);"><div style="min-height:115.99px;"><div style="float:left;border:1px solid #B8B8B8;margin:12px;width:92px;position:relative;height:92px;border-radius:50%;background:transparent;"><a href="https://froot.club/users/${rdata.UserId}/profile" style="width:100%;height:100%;display:block;"><img src="https://froot.club/avatar-thumbnail/image?userId=${rdata.UserId}&width=420&height=420&format=png" style="width:100%;height:100%;display:block;"><div style="float:right;right:0;bottom:0;margin:0;position:absolute;display:${rdata.IsOnline ? 'block' : 'none'};"><span class="avatar-status icon-${rdata.LastLocation === 'Website' ? 'online' : 'game'}" title="${rdata.LastLocation}"></span></div></a></div><div style="width:calc(100% - 146px);margin:0;padding:12px 0;float:left;"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:300;">${rdata.Name}</div><div style="color:#B8B8B8;padding:3px 0 0;font-size:14px;font-weight:400;">${rdata.IsOnline ? rdata.LastLocation : 'Offline'}</div></div></div>${relationship?.status ? `<div style="height:57px;padding:9px;background:#F2F2F2;border-top:1px solid #E3E3E3;border-radius:0 0 3px 3px;"><button class="btn-control-md friend ${relationship.status === 'NotFriends' ? 'addfriend' : ''}" data-userid="${rdata.UserId}" style="width:100%;border:1px solid #B8B8B8;background:#fff;color:${(relationship.status === 'RequestSent' || relationship.status === 'Friends' || rdata.UserId === userId) ? '#B8B8B8' : '#191919'};cursor:${(relationship.status === 'RequestSent' || relationship.status === 'Friends' || rdata.UserId === userId) ? 'default' : 'pointer'};display:inline-block;font-weight:400;text-align:center;white-space:nowrap;vertical-align:middle;padding:9px;font-size:18px;line-height:100%;border-radius:3px;">${rdata.UserId === userId ? 'You' : relationship.status === 'NotFriends' ? 'Add Friend' : relationship.status === 'RequestSent' ? 'Request Sent' : relationship.status === 'RequestReceived' ? 'Accept Request' : 'Friends'}</button></div>` : ''}</div></li>`); }); result.querySelectorAll('.addfriend').forEach(btn => { btn.addEventListener('click', () => { const uid = btn.getAttribute('data-userid'); fetch(`https://froot.club/apisite/friends/v1/users/${uid}/request-friendship`, { method: 'POST' }); btn.textContent = 'Request Sent'; btn.classList.remove('addfriend'); btn.style.color = '#B8B8B8'; btn.style.cursor = 'default'; }); }); }); }).catch(() => {}); } }); } if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run(); })();
+    if (extEnabled(22)) (function () { if (!location.pathname.startsWith('/search/users') && !location.href.includes('/search/users')) return; function run() { document.querySelector('.d-none')?.remove(); document.querySelectorAll('[class*="row-"]').forEach(item => { if (!item.classList.contains('flex')) return; if (item.querySelector('.ng-scope')) return; const searchText = document.querySelector('[class*="input"]')?.getAttribute('value') || new URLSearchParams(location.search).get('keyword') || ''; item.parentElement.style.width = '100%'; item.style.backgroundColor = '#E3E3E3'; item.innerHTML = `<div ng-include="'player-search-page'" class="ng-scope" style="width:100%;"><div class="top-row ng-scope"><h3 ng-if="!appMeta.isI18nEnabled" class="header ng-scope" style="display:flex;gap:5px;"><div style="font-weight:300;width:max-content;">Player Results for</div><span class="keyword ng-binding" style="font-weight:400;">${searchText}</span></h3><div class="search-container" style="margin:6px 0;"><div class="input-group" style="position:relative;display:table;clear:both;"><input class="form-control input-field ng-pristine ng-untouched ng-valid ng-not-empty" value="${searchText}" type="text" placeholder="Search" style="font-weight:300;font-size:16px;height:38px;padding:5px 12px;width:101%;border:1px solid #B8B8B8;border-radius:3px;outline:none;box-shadow:none;border-right:0;"><div class="input-group-btn" style="position:relative;display:table-cell;width:1%;vertical-align:middle;"><button class="input-addon-btn" style="background:#fff;border:1px solid #B8B8B8;border-left:0;border-radius:3px;box-shadow:none;height:38px;outline:none;"><span class="icon-search"></span></button></div></div></div><div class="row results-count ng-scope" style="display:flex;"><span class="text-secondary hideable ng-binding" style="width:max-content;padding-right:2px;font-size:12px;font-weight:400;color:#757575;">1 - 12 of</span><span class="text-secondary ng-binding" style="width:max-content;padding-left:0;font-size:12px;font-weight:400;color:#757575;">1 <ng-pluralize>Result</ng-pluralize></span></div></div><div class="col-xs-12 section-content-off no-results ng-binding ng-scope ng-hide" style="display:none;">There are no matches available for "${searchText}"</div><div class="col-xs-12 section-content-off no-results ng-binding ng-scope" style="display:${searchText.length < 3 ? 'block' : 'none'};">Please enter at least 3 characters.</div><div class="col-xs-12 section-content-off unsafe-input ng-scope ng-hide" style="display:none;">You have entered unsafe input. Please try your search again.</div><ul class="search-result avatar-cards ng-scope"></ul><div class="results-loading ng-scope" style="display:flex;flex-wrap:wrap;min-height:554.95px;align-content:flex-start;"><img class="spinner loading-default load-image" src="https://sakura.mba/img/loading.gif" style="width:80px;height:24px;vertical-align:middle;display:${searchText.length < 3 ? 'none' : 'block'};margin-top:10%;margin-left:calc(50% - 31px);"></div><div class="row ng-scope"><div class="rbx-pager"><ul class="pager" style="display:flex;justify-content:center;align-items:center;"><li class="pager-prev disabled" style="float:none;display:inline-block;vertical-align:top;list-style:none;margin:0;padding:0;"><a style="background-color:#FFF;margin-right:5px;"><span class="icon-left"></span></a></li><li class="pager-cur" style="list-style:none;vertical-align:middle;height:max-content;"><span id="rbx-current-page" class="ng-binding" style="font-weight:300;vertical-align:middle;">1</span></li><li class="pager-total" style="list-style:none;margin-left:2px;height:max-content;"><span style="font-weight:300;vertical-align:middle;">of</span><span class="ng-binding" style="font-weight:300;vertical-align:middle;">1</span></li><li class="pager-next" style="float:none;display:inline-block;vertical-align:top;list-style:none;margin:0 0 0 5px;"><a style="background-color:#FFF;"><span class="icon-right"></span></a></li></ul></div></div></div>`; const input = item.querySelector('.input-field'); if (input) { input.addEventListener('keydown', e => { if (e.key === 'Enter') location.href = 'https://sakura.mba/search/users?keyword=' + encodeURIComponent(input.value); }); } if (searchText.length > 2) { fetch(`https://sakura.mba/search/users/results?keyword=${encodeURIComponent(searchText)}&maxRows=12&startIndex=0`).then(r => r.json()).then(data => { const userId = Number(document.querySelector('[class*="nameLink"]')?.href?.match(/\/users\/(\d+)/)?.[1] || 0); const result = item.querySelector('.results-loading'); fetch(`https://sakura.mba/apisite/friends/v1/users/${userId}/friends/statuses?userIds=${(data.UserSearchResults || []).slice(0, 9).map(u => u.UserId).join(',')}`).then(r => r.json()).catch(() => ({})).then(friends => { result.innerHTML = ''; (data.UserSearchResults || []).slice(0, 9).forEach(rdata => { const relationship = friends?.data?.find(f => f.id === rdata.UserId) || {}; result.insertAdjacentHTML('afterbegin', `<li style="padding-left:0;width:33.3%;padding:0 5px 12px;list-style:none;"><div style="border-radius:3px;padding:0;background-color:#fff;position:relative;box-shadow:0 1px 4px 0 rgba(25,25,25,0.3);"><div style="min-height:115.99px;"><div style="float:left;border:1px solid #B8B8B8;margin:12px;width:92px;position:relative;height:92px;border-radius:50%;background:transparent;"><a href="https://sakura.mba/users/${rdata.UserId}/profile" style="width:100%;height:100%;display:block;"><img src="https://sakura.mba/avatar-thumbnail/image?userId=${rdata.UserId}&width=420&height=420&format=png" style="width:100%;height:100%;display:block;"><div style="float:right;right:0;bottom:0;margin:0;position:absolute;display:${rdata.IsOnline ? 'block' : 'none'};"><span class="avatar-status icon-${rdata.LastLocation === 'Website' ? 'online' : 'game'}" title="${rdata.LastLocation}"></span></div></a></div><div style="width:calc(100% - 146px);margin:0;padding:12px 0;float:left;"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:300;">${rdata.Name}</div><div style="color:#B8B8B8;padding:3px 0 0;font-size:14px;font-weight:400;">${rdata.IsOnline ? rdata.LastLocation : 'Offline'}</div></div></div>${relationship?.status ? `<div style="height:57px;padding:9px;background:#F2F2F2;border-top:1px solid #E3E3E3;border-radius:0 0 3px 3px;"><button class="btn-control-md friend ${relationship.status === 'NotFriends' ? 'addfriend' : ''}" data-userid="${rdata.UserId}" style="width:100%;border:1px solid #B8B8B8;background:#fff;color:${(relationship.status === 'RequestSent' || relationship.status === 'Friends' || rdata.UserId === userId) ? '#B8B8B8' : '#191919'};cursor:${(relationship.status === 'RequestSent' || relationship.status === 'Friends' || rdata.UserId === userId) ? 'default' : 'pointer'};display:inline-block;font-weight:400;text-align:center;white-space:nowrap;vertical-align:middle;padding:9px;font-size:18px;line-height:100%;border-radius:3px;">${rdata.UserId === userId ? 'You' : relationship.status === 'NotFriends' ? 'Add Friend' : relationship.status === 'RequestSent' ? 'Request Sent' : relationship.status === 'RequestReceived' ? 'Accept Request' : 'Friends'}</button></div>` : ''}</div></li>`); }); result.querySelectorAll('.addfriend').forEach(btn => { btn.addEventListener('click', () => { const uid = btn.getAttribute('data-userid'); fetch(`https://sakura.mba/apisite/friends/v1/users/${uid}/request-friendship`, { method: 'POST' }); btn.textContent = 'Request Sent'; btn.classList.remove('addfriend'); btn.style.color = '#B8B8B8'; btn.style.cursor = 'default'; }); }); }); }).catch(() => {}); } }); } if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run(); })();
 
     // ============================================================
-    // #23 — Trade+ (без изменений, адаптирован для froot.club)
+    // #23 — Trade+ (без изменений, адаптирован для sakura.mba)
     // ============================================================
     if (extEnabled(23)) (function () {
         if (!location.pathname.startsWith('/Trade/')) return;
-        const BASE_URL = 'https://froot.club';
+        const BASE_URL = 'https://sakura.mba';
         const AUTH_ENDPOINT = '/apisite/users/v1/users/authenticated';
         const INVENTORY_ENDPOINT = '/apisite/inventory/v1/users/{userId}/assets/collectibles';
         const TRADE_ENDPOINT = '/apisite/trades/v1/trades/send';
@@ -4716,17 +4823,17 @@ kbH +
 
         async function getCurrentUser() {
             try {
-                const resp = await fetch('https://froot.club/apisite/users/v1/users/authenticated', { credentials: 'include' });
+                const resp = await fetch('https://sakura.mba/apisite/users/v1/users/authenticated', { credentials: 'include' });
                 const data = await resp.json();
                 const uid = String(data.id);
                 const name = data.displayName || data.name || 'User';
-                const thumbResp = await fetch(`https://froot.club/apisite/thumbnails/v1/users/avatar-headshot?userIds=${uid}&size=64x64&format=Png`, { credentials: 'include' });
+                const thumbResp = await fetch(`https://sakura.mba/apisite/thumbnails/v1/users/avatar-headshot?userIds=${uid}&size=64x64&format=Png`, { credentials: 'include' });
                 const thumbData = await thumbResp.json();
-                const avatar = thumbData.data?.[0]?.imageUrl || 'https://froot.club/img/placeholder.png';
+                const avatar = thumbData.data?.[0]?.imageUrl || 'https://sakura.mba/img/placeholder.png';
                 return { id: uid, name, avatar };
             } catch(e) {
                 console.error('[Trading Lounge] Failed to get user info:', e);
-                return { id: '0', name: 'Guest', avatar: 'https://froot.club/img/placeholder.png' };
+                return { id: '0', name: 'Guest', avatar: 'https://sakura.mba/img/placeholder.png' };
             }
         }
 
@@ -4959,7 +5066,7 @@ kbH +
                             border: 1px solid #efefef;
                         `;
                         const avatar = document.createElement('img');
-                        avatar.src = msg.userAvatar || 'https://froot.club/img/placeholder.png';
+                        avatar.src = msg.userAvatar || 'https://sakura.mba/img/placeholder.png';
                         avatar.style.cssText = 'width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex-shrink: 0;';
                         const contentDiv = document.createElement('div');
                         contentDiv.style.flex = '1';
@@ -5088,10 +5195,9 @@ kbH +
         initTradingLounge();
     })();
 
-
-     // ============================================================
+    // ============================================================
     // #28 — Username History (полная история ников пользователя)
-   // ============================================================
+    // ============================================================
     (function () {
         if (!extEnabled(28)) return;
 
@@ -5099,7 +5205,7 @@ kbH +
             return new Promise((resolve) => {
                 GM_xmlhttpRequest({
                     method: 'GET',
-                    url: `https://froot.club/apisite/users/v1/users/${userId}/username-history?limit=100`,
+                    url: `https://sakura.mba/apisite/users/v1/users/${userId}/username-history?limit=100`,
                     withCredentials: true,
                     headers: { 'Accept': 'application/json' },
                     onload: function (r) {
@@ -5257,574 +5363,514 @@ kbH +
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initHistory);
         else initHistory();
     })();
-
-// ============================================================
-// #29 — Custom Trade Sound (свой MP3, удаляемая кнопка)
-// ============================================================
-(function() {
-    // Проверяем, включена ли функция через панель FrooExp
-    if (!extEnabled(29)) return;
-
-    // Регистрация в глобальных структурах (чтобы тумблер появился)
-    if (typeof EXT_META !== 'undefined' && !EXT_META[29]) {
-        EXT_META[29] = 'Trade Sound';
-    }
-    if (typeof SECTIONS !== 'undefined') {
-        let uiSection = SECTIONS.find(s => s.id === 'ui');
-        if (uiSection && !uiSection.exts.includes(29)) {
-            uiSection.exts.push(29);
-        }
-    }
-    if (typeof EXT_LABELS !== 'undefined' && !EXT_LABELS[29]) {
-        EXT_LABELS[29] = 'Trade Sound';
-    }
-
-    const CUSTOM_SOUND_KEY = 'frooexp_custom_trade_sound_v2';
-    let customSoundUrl = null;
-    let seenTradeIds = new Set();
-    let pollInterval = null;
-    let soundWindow = null;
-    let sidebarButton = null; // ссылка на кнопку в сайдбаре
-
-    // Загрузка сохранённого звука
-    function loadCustomSound() {
-        try {
-            customSoundUrl = GM_getValue(CUSTOM_SOUND_KEY, null);
-        } catch(e) {}
-    }
-    loadCustomSound();
-
-    function saveCustomSound(url) {
-        customSoundUrl = url;
-        GM_setValue(CUSTOM_SOUND_KEY, url);
-    }
-
-    function playCustomSound() {
-        if (!customSoundUrl) return;
-        try {
-            const audio = new Audio(customSoundUrl);
-            audio.volume = 0.7;
-            audio.play().catch(e => console.warn('[TradeSound] Play failed', e));
-        } catch(e) {
-            console.error('[TradeSound] Error', e);
-        }
-    }
-
-    async function fetchInboundTrades() {
-        return new Promise((resolve) => {
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: 'https://froot.club/apisite/trades/v1/trades/inbound?limit=50',
-                withCredentials: true,
-                headers: { 'Accept': 'application/json' },
-                onload: function(r) {
-                    try {
-                        const data = JSON.parse(r.responseText);
-                        resolve(data.data || []);
-                    } catch(e) {
-                        resolve([]);
-                    }
-                },
-                onerror: () => resolve([])
-            });
-        });
-    }
-
-    async function checkNewTrades() {
-        const trades = await fetchInboundTrades();
-        const currentIds = new Set(trades.map(t => t.id));
-        const newTrades = trades.filter(t => !seenTradeIds.has(t.id));
-        if (newTrades.length > 0) {
-            console.log(`[TradeSound] New trade(s): ${newTrades.length}`);
-            playCustomSound();
-        }
-        seenTradeIds = currentIds;
-    }
-
-    function startPolling() {
-        if (pollInterval) clearInterval(pollInterval);
-        checkNewTrades();
-        pollInterval = setInterval(checkNewTrades, 5000);
-    }
-    function stopPolling() {
-        if (pollInterval) {
-            clearInterval(pollInterval);
-            pollInterval = null;
-        }
-    }
-
-    // --- Создание/удаление кнопки в сайдбаре ---
-    function createSidebarButton() {
-        if (!extEnabled(29)) return null;
-        if (sidebarButton) return sidebarButton;
-        const sidebar = document.querySelector('div[class*="card"]');
-        if (!sidebar) return null;
-        const homeBtn = [...sidebar.querySelectorAll('a')].find(a => a.textContent.trim() === 'Home');
-        if (!homeBtn) return null;
-        const btn = homeBtn.cloneNode(true);
-        btn.id = 'custom-sound-sidebar-btn';
-        btn.href = 'javascript:void(0)';
-        const iconSpan = document.createElement('span');
-        iconSpan.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-right:4px;vertical-align:middle;flex-shrink:0;opacity:0.85';
-        iconSpan.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>';
-        const existingIcon = btn.querySelector('svg, span[class*="icon"]');
-        if (existingIcon) existingIcon.replaceWith(iconSpan);
-        else btn.prepend(iconSpan);
-        const textSpan = [...btn.querySelectorAll('*')].find(el => el.children.length === 0 && el.textContent.trim() !== '');
-        if (textSpan) textSpan.textContent = 'Trade Sound';
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            createDraggableSoundWindow();
-        });
-        const upgradeBtn = [...sidebar.querySelectorAll('a')].find(a => a.textContent.includes('Upgrade'));
-        if (upgradeBtn) sidebar.insertBefore(btn, upgradeBtn);
-        else sidebar.appendChild(btn);
-        sidebarButton = btn;
-        console.log('[TradeSound] Sidebar button added');
-        return btn;
-    }
-
-    function removeSidebarButton() {
-        if (sidebarButton) {
-            sidebarButton.remove();
-            sidebarButton = null;
-            console.log('[TradeSound] Sidebar button removed');
-        }
-        const existing = document.getElementById('custom-sound-sidebar-btn');
-        if (existing) existing.remove();
-    }
-
-    // --- Передвижное окно (без изменений) ---
-    function createDraggableSoundWindow() {
-        if (soundWindow) {
-            soundWindow.closest('.ts-overlay')?.remove();
-            soundWindow = null;
-        }
-        const overlay = document.createElement('div');
-        overlay.className = 'ts-overlay';
-        overlay.style.cssText = `
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5); z-index: 999991; display: flex;
-            align-items: center; justify-content: center; backdrop-filter: blur(2px);
-        `;
-        const win = document.createElement('div');
-        win.className = 'ts-window';
-        win.style.cssText = `
-            width: 380px; background: #1e1e2e; border-radius: 12px;
-            border: 1px solid #333; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            display: flex; flex-direction: column; overflow: hidden;
-            font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-        `;
-        const header = document.createElement('div');
-        header.style.cssText = `
-            padding: 12px 16px; background: #2a2a3d; border-bottom: 1px solid #333;
-            display: flex; justify-content: space-between; align-items: center;
-            cursor: move; user-select: none;
-        `;
-        header.innerHTML = `
-            <span style="font-weight: 700; font-size: 14px;">🔊 Custom Trade Sound</span>
-            <button class="ts-close" style="background: none; border: none; font-size: 22px; cursor: pointer; color: #aaa;">&times;</button>
-        `;
-        const body = document.createElement('div');
-        body.style.cssText = 'padding: 16px;';
-        body.innerHTML = `
-            <div style="margin-bottom: 12px;">
-                <label style="display: block; margin-bottom: 6px; font-size: 12px;">MP3 URL (http/https):</label>
-                <input type="text" id="ts-url-input" placeholder="https://example.com/sound.mp3" style="width: 100%; padding: 8px; background: #111; border: 1px solid #333; color: #fff; border-radius: 6px; font-size: 12px;" value="${customSoundUrl || ''}">
-            </div>
-            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                <button id="ts-set-url" style="flex:1; background: #4f8ef7; border: none; padding: 8px; border-radius: 6px; color: #fff; cursor: pointer;">Set from URL</button>
-                <button id="ts-upload" style="flex:1; background: #555; border: none; padding: 8px; border-radius: 6px; color: #fff; cursor: pointer;">Upload MP3</button>
-                <button id="ts-test" style="flex:1; background: #888; border: none; padding: 8px; border-radius: 6px; color: #fff; cursor: pointer;">Test</button>
-            </div>
-            <div style="display: flex; gap: 8px;">
-                <button id="ts-reset" style="flex:1; background: #ff4444; border: none; padding: 8px; border-radius: 6px; color: #fff; cursor: pointer;">Reset to default</button>
-                <button id="ts-close-bottom" style="flex:1; background: #333; border: none; padding: 8px; border-radius: 6px; color: #fff; cursor: pointer;">Close</button>
-            </div>
-            <input type="file" id="ts-file" accept="audio/mpeg,audio/mp3" style="display:none;">
-            <div id="ts-status" style="margin-top: 12px; font-size: 11px; color: #aaa; text-align: center;"></div>
-        `;
-        win.appendChild(header);
-        win.appendChild(body);
-        overlay.appendChild(win);
-        document.body.appendChild(overlay);
-        soundWindow = win;
-
-        const close = () => overlay.remove();
-        header.querySelector('.ts-close').addEventListener('click', close);
-        body.querySelector('#ts-close-bottom').addEventListener('click', close);
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-
-        let offsetX, offsetY, isDragging = false;
-        header.addEventListener('mousedown', (e) => {
-            if (e.target === header.querySelector('.ts-close')) return;
-            isDragging = true;
-            const rect = win.getBoundingClientRect();
-            offsetX = e.clientX - rect.left;
-            offsetY = e.clientY - rect.top;
-            win.style.transition = 'none';
-            e.preventDefault();
-        });
-        window.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            let left = e.clientX - offsetX;
-            let top = e.clientY - offsetY;
-            left = Math.min(Math.max(left, 10), window.innerWidth - win.offsetWidth - 10);
-            top = Math.min(Math.max(top, 10), window.innerHeight - win.offsetHeight - 10);
-            win.style.position = 'fixed';
-            win.style.left = left + 'px';
-            win.style.top = top + 'px';
-            win.style.right = 'auto';
-            win.style.bottom = 'auto';
-            win.style.margin = '0';
-        });
-        window.addEventListener('mouseup', () => {
-            isDragging = false;
-            win.style.transition = '';
-        });
-
-        const urlInput = document.getElementById('ts-url-input');
-        const setUrlBtn = document.getElementById('ts-set-url');
-        const uploadBtn = document.getElementById('ts-upload');
-        const testBtn = document.getElementById('ts-test');
-        const resetBtn = document.getElementById('ts-reset');
-        const fileInput = document.getElementById('ts-file');
-        const statusDiv = document.getElementById('ts-status');
-
-        function setStatus(msg, isError = false) {
-            statusDiv.textContent = msg;
-            statusDiv.style.color = isError ? '#ff8888' : '#88ff88';
-            setTimeout(() => { if (statusDiv.textContent === msg) statusDiv.textContent = ''; }, 3000);
-        }
-
-        setUrlBtn.addEventListener('click', () => {
-            let url = urlInput.value.trim();
-            if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
-                saveCustomSound(url);
-                setStatus('✓ URL saved');
-            } else {
-                setStatus('✗ Enter valid HTTP/HTTPS URL', true);
-            }
-        });
-        uploadBtn.addEventListener('click', () => fileInput.click());
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file && file.type === 'audio/mpeg') {
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                    const dataUrl = ev.target.result;
-                    saveCustomSound(dataUrl);
-                    urlInput.value = dataUrl.substring(0, 60) + '…';
-                    setStatus('✓ MP3 uploaded');
-                };
-                reader.readAsDataURL(file);
-            } else {
-                setStatus('✗ Please select MP3 file', true);
-            }
-        });
-        testBtn.addEventListener('click', () => {
-            if (customSoundUrl) {
-                const audio = new Audio(customSoundUrl);
-                audio.volume = 0.7;
-                audio.play().catch(e => setStatus('✗ Cannot play: ' + e.message, true));
-            } else {
-                setStatus('✗ No custom sound set', true);
-            }
-        });
-        resetBtn.addEventListener('click', () => {
-            saveCustomSound(null);
-            urlInput.value = '';
-            setStatus('✓ Custom sound removed');
-        });
-    }
-
-    // --- Следим за изменением состояния фичи (чтобы убирать/добавлять кнопку) ---
-    function watchFeatureToggle() {
-        // Перехватываем изменение localStorage для ключа korone_ext_29
-        const originalSetItem = localStorage.setItem;
-        localStorage.setItem = function(key, value) {
-            originalSetItem.apply(this, arguments);
-            if (key === 'korone_ext_29') {
-                const isEnabled = value === 'true';
-                if (!isEnabled) {
-                    removeSidebarButton();
-                    stopPolling();
-                } else {
-                    createSidebarButton();
-                    startPolling();
-                }
-            }
-        };
-        // Также наблюдаем за панелью, чтобы при переключении через интерфейс сработало
-        window.addEventListener('storage', (e) => {
-            if (e.key === 'korone_ext_29') {
-                const isEnabled = e.newValue === 'true';
-                if (!isEnabled) {
-                    removeSidebarButton();
-                    stopPolling();
-                } else {
-                    createSidebarButton();
-                    startPolling();
-                }
-            }
-        });
-    }
-
-    // --- Инициализация ---
-    function init() {
-        watchFeatureToggle();
-        if (extEnabled(29)) {
-            createSidebarButton();
-            startPolling();
-        } else {
-            removeSidebarButton();
-            stopPolling();
-        }
-        // На случай, если сайдбар появится позже
-        const observer = new MutationObserver(() => {
-            if (extEnabled(29) && !sidebarButton) {
-                createSidebarButton();
-            } else if (!extEnabled(29) && sidebarButton) {
-                removeSidebarButton();
-            }
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-})();
-
-// ============================================================
-// #30 — Highlight Own Items (подсветка своих предметов в чужом инвентаре)
-// ============================================================
-(function() {
-    if (!extEnabled(30)) return;
-
-    // Регистрация
-    if (typeof EXT_META !== 'undefined' && !EXT_META[30]) {
-        EXT_META[30] = 'Highlight Own Items';
-    }
-    if (typeof SECTIONS !== 'undefined') {
-        let catalogSection = SECTIONS.find(s => s.id === 'catalog');
-        if (catalogSection && !catalogSection.exts.includes(30)) {
-            catalogSection.exts.push(30);
-        }
-    }
-    if (typeof EXT_LABELS !== 'undefined' && !EXT_LABELS[30]) {
-        EXT_LABELS[30] = 'Highlight Own Items';
-    }
-    if (typeof extEnabled !== 'undefined' && typeof localStorage !== 'undefined') {
-        if (localStorage.getItem('korone_ext_30') === null) {
-            localStorage.setItem('korone_ext_30', 'true');
-        }
-    }
-
-    let myInventoryIds = new Set();
-    let isFetching = false;
-
-    // Получение своего инвентаря (ID всех предметов)
-    async function fetchMyInventory() {
-        if (isFetching) return;
-        isFetching = true;
-        try {
-            const resp = await fetch('https://froot.club/apisite/inventory/v1/users/authenticated/assets/collectibles?limit=100', { credentials: 'include' });
-            const data = await resp.json();
-            if (data.data) {
-                data.data.forEach(item => myInventoryIds.add(item.assetId));
-                // Пагинация: можно добавить цикл, но для простоты первые 100
-            }
-        } catch(e) {
-            console.error('[HighlightOwn] Failed to fetch inventory', e);
-        }
-        isFetching = false;
-    }
-
-    // Подсветка предметов на странице инвентаря другого пользователя
-    function highlightOwnItems() {
-        if (!location.pathname.includes('/inventory') && !location.pathname.includes('/collectibles')) return;
-        // Ищем карточки предметов
-        const cards = document.querySelectorAll('.col-6.col-md-4.col-lg-2.mb-2, [class*="itemCard"]');
-        cards.forEach(card => {
-            const link = card.querySelector('a[href*="/catalog/"]');
-            if (!link) return;
-            const match = link.href.match(/\/catalog\/(\d+)/);
-            if (!match) return;
-            const assetId = parseInt(match[1], 10);
-            if (myInventoryIds.has(assetId)) {
-                card.style.border = '2px solid #4ade80';
-                card.style.borderRadius = '8px';
-                card.style.boxShadow = '0 0 8px rgba(74,222,128,0.5)';
-            }
-        });
-    }
-
-    async function init() {
-        await fetchMyInventory();
-        highlightOwnItems();
-        const observer = new MutationObserver(() => highlightOwnItems());
-        observer.observe(document.body, { childList: true, subtree: true });
-    }
-
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-    else init();
-})();
-
-// ============================================================
-// #31 — Price Discount (скидка относительно средней цены за неделю)
-// ============================================================
-(function() {
-    if (!extEnabled(32)) return;
-
-    if (typeof EXT_META !== 'undefined' && !EXT_META[32]) {
-        EXT_META[32] = 'Price Discount';
-    }
-    if (typeof SECTIONS !== 'undefined') {
-        let catalogSection = SECTIONS.find(s => s.id === 'catalog');
-        if (catalogSection && !catalogSection.exts.includes(32)) {
-            catalogSection.exts.push(32);
-        }
-    }
-    if (typeof EXT_LABELS !== 'undefined' && !EXT_LABELS[32]) {
-        EXT_LABELS[32] = 'Price Discount';
-    }
-    if (typeof extEnabled !== 'undefined' && typeof localStorage !== 'undefined') {
-        if (localStorage.getItem('korone_ext_32') === null) {
-            localStorage.setItem('korone_ext_32', 'true');
-        }
-    }
-
-    // Кэш средних цен (assetId -> avgPrice)
-    let avgPriceCache = new Map();
-    let loadingCache = new Set();
-
-    async function fetchWeeklyAverage(assetId) {
-        if (avgPriceCache.has(assetId)) return avgPriceCache.get(assetId);
-        if (loadingCache.has(assetId)) return null;
-        loadingCache.add(assetId);
-        try {
-            // Пробуем получить данные из koromons (там есть поле Trend или средняя цена)
-            // Альтернатива – можно рассчитать самим, но используем готовое API
-            const response = await fetch(`https://koromons.xyz/api/items/${assetId}`);
-            if (response.ok) {
-                const data = await response.json();
-                let avg = null;
-                if (data.weeklyAverage) avg = data.weeklyAverage;
-                else if (data.averagePrice) avg = data.averagePrice;
-                else if (data.Trend && data.Trend.average) avg = data.Trend.average;
-                if (avg !== null) {
-                    avgPriceCache.set(assetId, avg);
-                    return avg;
-                }
-            }
-            // Запасной вариант – вычисляем по RAP (недельный RAP)
-            const rapResp = await fetch(`https://froot.club/apisite/economy/v1/assets/${assetId}/details`);
-            if (rapResp.ok) {
-                const details = await rapResp.json();
-                const rap = details.recentAveragePrice || details.price || 0;
-                // Для простоты используем RAP как среднюю (недельная средняя часто близка к RAP)
-                if (rap > 0) {
-                    avgPriceCache.set(assetId, rap);
-                    return rap;
-                }
-            }
-            return null;
-        } catch(e) {
-            console.warn('[PriceDiscount] Failed to fetch avg for', assetId, e);
-            return null;
-        } finally {
-            loadingCache.delete(assetId);
-        }
-    }
-
-    async function injectDiscount() {
-        const match = location.pathname.match(/\/catalog\/(\d+)/);
-        if (!match) return;
-        const assetId = match[1];
-
-        // Ищем элемент с ценой
-        const priceEl = document.querySelector('[class*="priceLabel"], .priceLabel-0-2-61, [class*="price"]');
-        if (!priceEl) return;
-
-        // Уже добавлен дисконт?
-        if (document.getElementById('pd-discount')) return;
-
-        const priceText = priceEl.textContent.trim();
-        const currentPrice = parseInt(priceText.replace(/[^0-9]/g, ''), 10);
-        if (isNaN(currentPrice) || currentPrice === 0) return;
-
-        const avgPrice = await fetchWeeklyAverage(assetId);
-        if (!avgPrice || avgPrice === 0) return;
-
-        const diff = currentPrice - avgPrice;
-        const percent = ((diff / avgPrice) * 100).toFixed(1);
-        const isDiscount = diff < 0;
-
-        const discountSpan = document.createElement('div');
-        discountSpan.id = 'pd-discount';
-        discountSpan.style.cssText = `
-            font-size: 13px;
-            margin-top: 4px;
-            color: ${isDiscount ? '#4ade80' : '#f87171'};
-            font-weight: 500;
-            background: rgba(0,0,0,0.05);
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 16px;
-        `;
-        if (isDiscount) {
-            discountSpan.innerHTML = `📉 ${Math.abs(percent)}% below weekly avg (${avgPrice.toLocaleString()} R$)`;
-        } else {
-            discountSpan.innerHTML = `📈 +${percent}% above weekly avg (${avgPrice.toLocaleString()} R$)`;
-        }
-
-        // Вставляем после цены
-        priceEl.parentElement.insertBefore(discountSpan, priceEl.nextSibling);
-    }
-
-    function init() {
-        if (!location.pathname.includes('/catalog/')) return;
-        setTimeout(injectDiscount, 1000);
-        const observer = new MutationObserver(() => {
-            if (!document.getElementById('pd-discount')) injectDiscount();
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-    const pushState = history.pushState;
-    history.pushState = function() {
-        pushState.apply(this, arguments);
-        setTimeout(init, 500);
-    };
-    window.addEventListener('popstate', () => setTimeout(init, 500));
-})();
-
     // ============================================================
-    // Звук и эффект капли при загрузке
+    // #30 — Highlight Own Items (подсветка своих предметов в чужом инвентаре)
     // ============================================================
     (function() {
-        const audio = new Audio('https://files.catbox.moe/xxxcm4.mp3');
-        audio.volume = 0.7;
-        audio.play().catch(e => console.log('Audio play failed:', e));
-        const rippleDiv = document.createElement('div');
-        rippleDiv.id = 'frooexp-ripple';
-        rippleDiv.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 999999; background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 80%); opacity: 0; transition: opacity 0.8s ease-out;`;
-        document.body.appendChild(rippleDiv);
-        requestAnimationFrame(() => {
-            rippleDiv.style.opacity = '0.7';
+        if (!extEnabled(30)) return;
+
+        if (typeof EXT_META !== 'undefined' && !EXT_META[30]) {
+            EXT_META[30] = 'Highlight Own Items';
+        }
+        if (typeof SECTIONS !== 'undefined') {
+            let catalogSection = SECTIONS.find(s => s.id === 'catalog');
+            if (catalogSection && !catalogSection.exts.includes(30)) {
+                catalogSection.exts.push(30);
+            }
+        }
+        if (typeof EXT_LABELS !== 'undefined' && !EXT_LABELS[30]) {
+            EXT_LABELS[30] = 'Highlight Own Items';
+        }
+        if (typeof extEnabled !== 'undefined' && typeof localStorage !== 'undefined') {
+            if (localStorage.getItem('korone_ext_30') === null) {
+                localStorage.setItem('korone_ext_30', 'true');
+            }
+        }
+
+        let myInventoryIds = new Set();
+        let isFetching = false;
+
+        async function fetchMyInventory() {
+            if (isFetching) return;
+            isFetching = true;
+            try {
+                const resp = await fetch('https://sakura.mba/apisite/inventory/v1/users/authenticated/assets/collectibles?limit=100', { credentials: 'include' });
+                const data = await resp.json();
+                if (data.data) {
+                    data.data.forEach(item => myInventoryIds.add(item.assetId));
+                }
+            } catch(e) {
+                console.error('[HighlightOwn] Failed to fetch inventory', e);
+            }
+            isFetching = false;
+        }
+
+        function highlightOwnItems() {
+            if (!location.pathname.includes('/inventory') && !location.pathname.includes('/collectibles')) return;
+            const cards = document.querySelectorAll('.col-6.col-md-4.col-lg-2.mb-2, [class*="itemCard"]');
+            cards.forEach(card => {
+                const link = card.querySelector('a[href*="/catalog/"]');
+                if (!link) return;
+                const match = link.href.match(/\/catalog\/(\d+)/);
+                if (!match) return;
+                const assetId = parseInt(match[1], 10);
+                if (myInventoryIds.has(assetId)) {
+                    card.style.border = '2px solid #4ade80';
+                    card.style.borderRadius = '8px';
+                    card.style.boxShadow = '0 0 8px rgba(74,222,128,0.5)';
+                }
+            });
+        }
+
+        async function init() {
+            await fetchMyInventory();
+            highlightOwnItems();
+            const observer = new MutationObserver(() => highlightOwnItems());
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
+
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+        else init();
+    })();
+
+    // ============================================================
+    // #31 — Price Discount (скидка относительно средней цены за неделю)
+    // ============================================================
+    (function() {
+        if (!extEnabled(32)) return;
+
+        if (typeof EXT_META !== 'undefined' && !EXT_META[32]) {
+            EXT_META[32] = 'Price Discount';
+        }
+        if (typeof SECTIONS !== 'undefined') {
+            let catalogSection = SECTIONS.find(s => s.id === 'catalog');
+            if (catalogSection && !catalogSection.exts.includes(32)) {
+                catalogSection.exts.push(32);
+            }
+        }
+        if (typeof EXT_LABELS !== 'undefined' && !EXT_LABELS[32]) {
+            EXT_LABELS[32] = 'Price Discount';
+        }
+        if (typeof extEnabled !== 'undefined' && typeof localStorage !== 'undefined') {
+            if (localStorage.getItem('korone_ext_32') === null) {
+                localStorage.setItem('korone_ext_32', 'true');
+            }
+        }
+
+        let avgPriceCache = new Map();
+        let loadingCache = new Set();
+
+        async function fetchWeeklyAverage(assetId) {
+            if (avgPriceCache.has(assetId)) return avgPriceCache.get(assetId);
+            if (loadingCache.has(assetId)) return null;
+            loadingCache.add(assetId);
+            try {
+                const response = await fetch(`https://koromons.xyz/api/items/${assetId}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    let avg = null;
+                    if (data.weeklyAverage) avg = data.weeklyAverage;
+                    else if (data.averagePrice) avg = data.averagePrice;
+                    else if (data.Trend && data.Trend.average) avg = data.Trend.average;
+                    if (avg !== null) {
+                        avgPriceCache.set(assetId, avg);
+                        return avg;
+                    }
+                }
+                const rapResp = await fetch(`https://sakura.mba/apisite/economy/v1/assets/${assetId}/details`);
+                if (rapResp.ok) {
+                    const details = await rapResp.json();
+                    const rap = details.recentAveragePrice || details.price || 0;
+                    if (rap > 0) {
+                        avgPriceCache.set(assetId, rap);
+                        return rap;
+                    }
+                }
+                return null;
+            } catch(e) {
+                console.warn('[PriceDiscount] Failed to fetch avg for', assetId, e);
+                return null;
+            } finally {
+                loadingCache.delete(assetId);
+            }
+        }
+
+        async function injectDiscount() {
+            const match = location.pathname.match(/\/catalog\/(\d+)/);
+            if (!match) return;
+            const assetId = match[1];
+
+            const priceEl = document.querySelector('[class*="priceLabel"], .priceLabel-0-2-61, [class*="price"]');
+            if (!priceEl) return;
+
+            if (document.getElementById('pd-discount')) return;
+
+            const priceText = priceEl.textContent.trim();
+            const currentPrice = parseInt(priceText.replace(/[^0-9]/g, ''), 10);
+            if (isNaN(currentPrice) || currentPrice === 0) return;
+
+            const avgPrice = await fetchWeeklyAverage(assetId);
+            if (!avgPrice || avgPrice === 0) return;
+
+            const diff = currentPrice - avgPrice;
+            const percent = ((diff / avgPrice) * 100).toFixed(1);
+            const isDiscount = diff < 0;
+
+            const discountSpan = document.createElement('div');
+            discountSpan.id = 'pd-discount';
+            discountSpan.style.cssText = `
+                font-size: 13px;
+                margin-top: 4px;
+                color: ${isDiscount ? '#4ade80' : '#f87171'};
+                font-weight: 500;
+                background: rgba(0,0,0,0.05);
+                display: inline-block;
+                padding: 2px 8px;
+                border-radius: 16px;
+            `;
+            if (isDiscount) {
+                discountSpan.innerHTML = `📉 ${Math.abs(percent)}% below weekly avg (${avgPrice.toLocaleString()} R$)`;
+            } else {
+                discountSpan.innerHTML = `📈 +${percent}% above weekly avg (${avgPrice.toLocaleString()} R$)`;
+            }
+
+            priceEl.parentElement.insertBefore(discountSpan, priceEl.nextSibling);
+        }
+
+        function init() {
+            if (!location.pathname.includes('/catalog/')) return;
+            setTimeout(injectDiscount, 1000);
+            const observer = new MutationObserver(() => {
+                if (!document.getElementById('pd-discount')) injectDiscount();
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+        const pushState = history.pushState;
+        history.pushState = function() {
+            pushState.apply(this, arguments);
+            setTimeout(init, 500);
+        };
+        window.addEventListener('popstate', () => setTimeout(init, 500));
+    })();
+
+    // ============================================================
+    // #32 — Limited Items Notifier (новые лимитки из Discord)
+    // ============================================================
+    (function() {
+        if (!extEnabled(37)) return;
+
+        if (typeof EXT_META !== 'undefined' && !EXT_META[37]) {
+            EXT_META[37] = 'Limited Notifier';
+        }
+        if (typeof SECTIONS !== 'undefined') {
+            let tradingSection = SECTIONS.find(s => s.id === 'trading');
+            if (tradingSection && !tradingSection.exts.includes(37)) {
+                tradingSection.exts.push(37);
+            }
+        }
+        if (typeof EXT_LABELS !== 'undefined' && !EXT_LABELS[37]) {
+            EXT_LABELS[37] = 'Limited Notifier';
+        }
+        if (typeof extEnabled !== 'undefined' && typeof localStorage !== 'undefined') {
+            if (localStorage.getItem('korone_ext_37') === null) {
+                localStorage.setItem('korone_ext_37', 'true');
+            }
+        }
+
+        const DISCORD_CHANNEL_ID = '1496996333268111480';
+        const DISCORD_API = `https://discord.com/api/v9/channels/${DISCORD_CHANNEL_ID}/messages?limit=1`;
+        const STORAGE_LAST_ITEM = 'frooexp_last_limited_item';
+        const NOTIFY_SOUND_KEY = 'frooexp_limited_sound';
+
+        let pollInterval = null;
+        let lastItemId = null;
+        let lastItemName = '';
+        let isPolling = false;
+        let customSoundUrl = null;
+
+        function loadLastItem() {
+            try {
+                const saved = GM_getValue(STORAGE_LAST_ITEM, null);
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    lastItemId = parsed.id;
+                    lastItemName = parsed.name;
+                }
+            } catch(e) {}
+        }
+
+        function saveLastItem(id, name) {
+            lastItemId = id;
+            lastItemName = name;
+            GM_setValue(STORAGE_LAST_ITEM, JSON.stringify({ id, name, timestamp: Date.now() }));
+        }
+
+        function loadCustomSound() {
+            try {
+                customSoundUrl = GM_getValue(NOTIFY_SOUND_KEY, null);
+            } catch(e) {}
+        }
+
+        function playNotificationSound() {
+            if (customSoundUrl) {
+                try {
+                    const audio = new Audio(customSoundUrl);
+                    audio.volume = 0.7;
+                    audio.play().catch(e => console.warn('[LimitedNotifier] Sound play failed', e));
+                } catch(e) {}
+            } else {
+                try {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    function beep(f, s, d, v) {
+                        const o = ctx.createOscillator();
+                        const g = ctx.createGain();
+                        o.type = 'sine';
+                        o.frequency.value = f;
+                        g.gain.setValueAtTime(v, ctx.currentTime + s);
+                        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + s + d);
+                        o.connect(g);
+                        g.connect(ctx.destination);
+                        o.start(ctx.currentTime + s);
+                        o.stop(ctx.currentTime + s + d);
+                    }
+                    beep(880, 0, 0.15, 0.3);
+                    beep(1100, 0.12, 0.15, 0.25);
+                    beep(1320, 0.24, 0.2, 0.2);
+                } catch(e) {}
+            }
+        }
+
+        function extractAssetId(text) {
+            const match = text.match(/sakura\.mba\/catalog\/(\d+)/i);
+            if (match) return match[1];
+            const numMatch = text.match(/\b(\d{6,10})\b/);
+            if (numMatch) return numMatch[1];
+            return null;
+        }
+
+        function extractItemName(text) {
+            const lines = text.split('\n');
+            for (const line of lines) {
+                if (line.includes('catalog') || line.match(/\d{6,10}/)) continue;
+                if (line.trim().length > 3 && line.trim().length < 100) {
+                    return line.trim();
+                }
+            }
+            return 'New Limited Item';
+        }
+
+        async function fetchLatestMessage() {
+            return new Promise((resolve) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: DISCORD_API,
+                    headers: {
+                        'Accept': 'application/json'
+                    },
+                    onload: function(r) {
+                        if (r.status === 200) {
+                            try {
+                                const messages = JSON.parse(r.responseText);
+                                if (messages && messages.length > 0) {
+                                    resolve(messages[0]);
+                                } else {
+                                    resolve(null);
+                                }
+                            } catch(e) {
+                                console.error('[LimitedNotifier] Parse error', e);
+                                resolve(null);
+                            }
+                        } else {
+                            console.warn('[LimitedNotifier] Discord API returned', r.status);
+                            resolve(null);
+                        }
+                    },
+                    onerror: function(e) {
+                        console.error('[LimitedNotifier] Network error', e);
+                        resolve(null);
+                    }
+                });
+            });
+        }
+
+        async function checkNewLimited() {
+            if (isPolling) return;
+            isPolling = true;
+            try {
+                const message = await fetchLatestMessage();
+                if (!message) return;
+
+                const content = message.content;
+                const assetId = extractAssetId(content);
+                if (!assetId) return;
+
+                const itemName = extractItemName(content);
+
+                if (lastItemId !== assetId) {
+                    console.log(`[LimitedNotifier] New limited item detected! ID: ${assetId}, Name: ${itemName}`);
+                    saveLastItem(assetId, itemName);
+
+                    playNotificationSound();
+
+                    showNotificationToast(itemName, assetId);
+
+                    setTimeout(() => {
+                        window.open(`https://sakura.mba/catalog/${assetId}/item`, '_blank');
+                    }, 500);
+                }
+            } catch(e) {
+                console.error('[LimitedNotifier] Error', e);
+            } finally {
+                isPolling = false;
+            }
+        }
+
+        function showNotificationToast(itemName, assetId) {
+            const oldToast = document.getElementById('limited-toast');
+            if (oldToast) oldToast.remove();
+
+            const toast = document.createElement('div');
+            toast.id = 'limited-toast';
+            toast.style.cssText = `
+                position: fixed;
+                bottom: 80px;
+                right: 20px;
+                background: linear-gradient(135deg, #1a1a2e, #0f0f1a);
+                border-left: 4px solid #f59e42;
+                border-radius: 12px;
+                padding: 12px 16px;
+                color: #fff;
+                font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+                z-index: 999999;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+                animation: slideInRight 0.3s ease;
+                cursor: pointer;
+                max-width: 320px;
+            `;
+            toast.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 24px;">🆕</span>
+                    <div>
+                        <div style="font-weight: 700; font-size: 14px;">New Limited Item!</div>
+                        <div style="font-size: 12px; color: #f59e42;">${escapeHTML(itemName)}</div>
+                        <div style="font-size: 10px; color: #aaa;">ID: ${assetId}</div>
+                    </div>
+                </div>
+            `;
+
+            if (!document.querySelector('#limited-toast-style')) {
+                const style = document.createElement('style');
+                style.id = 'limited-toast-style';
+                style.textContent = `
+                    @keyframes slideInRight {
+                        from {
+                            transform: translateX(100%);
+                            opacity: 0;
+                        }
+                        to {
+                            transform: translateX(0);
+                            opacity: 1;
+                        }
+                    }
+                    @keyframes slideOutRight {
+                        from {
+                            transform: translateX(0);
+                            opacity: 1;
+                        }
+                        to {
+                            transform: translateX(100%);
+                            opacity: 0;
+                        }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            document.body.appendChild(toast);
+
+            toast.addEventListener('click', () => {
+                window.open(`https://sakura.mba/catalog/${assetId}/item`, '_blank');
+                toast.remove();
+            });
+
             setTimeout(() => {
-                rippleDiv.style.opacity = '0';
-                setTimeout(() => rippleDiv.remove(), 1000);
-            }, 800);
-        });
+                if (toast.parentNode) {
+                    toast.style.animation = 'slideOutRight 0.3s ease';
+                    setTimeout(() => toast.remove(), 300);
+                }
+            }, 10000);
+        }
+
+        function startPolling() {
+            if (pollInterval) clearInterval(pollInterval);
+            loadLastItem();
+            loadCustomSound();
+            setTimeout(checkNewLimited, 2000);
+            pollInterval = setInterval(checkNewLimited, 15000);
+        }
+
+        function stopPolling() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+            }
+        }
+
+        function injectSidebarButton() {
+            const sidebar = document.querySelector('div[class*="card"]');
+            if (!sidebar) return;
+            if (document.getElementById('limited-sidebar-btn')) return;
+            const homeBtn = [...sidebar.querySelectorAll('a')].find(a => a.textContent.trim() === 'Home');
+            if (!homeBtn) return;
+
+            const btn = homeBtn.cloneNode(true);
+            btn.id = 'limited-sidebar-btn';
+            btn.href = 'javascript:void(0)';
+            const iconSpan = document.createElement('span');
+            iconSpan.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-right:4px;vertical-align:middle;flex-shrink:0;opacity:0.85';
+            iconSpan.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v2"/></svg>';
+            const existingIcon = btn.querySelector('svg, span[class*="icon"]');
+            if (existingIcon) existingIcon.replaceWith(iconSpan);
+            else btn.prepend(iconSpan);
+            const textSpan = [...btn.querySelectorAll('*')].find(el => el.children.length === 0 && el.textContent.trim() !== '');
+            if (textSpan) textSpan.textContent = 'Limited Monitor';
+
+            let isMonitoring = true;
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (isMonitoring) {
+                    stopPolling();
+                    btn.style.opacity = '0.5';
+                    btn.title = 'Monitoring stopped. Click to start.';
+                    isMonitoring = false;
+                } else {
+                    startPolling();
+                    btn.style.opacity = '1';
+                    btn.title = 'Monitoring active. Click to stop.';
+                    isMonitoring = true;
+                }
+            });
+
+            const upgradeBtn = [...sidebar.querySelectorAll('a')].find(a => a.textContent.includes('Upgrade'));
+            if (upgradeBtn) sidebar.insertBefore(btn, upgradeBtn);
+            else sidebar.appendChild(btn);
+
+            startPolling();
+        }
+
+        function init() {
+            injectSidebarButton();
+            const observer = new MutationObserver(() => injectSidebarButton());
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
+
+        init();
     })();
 
     // Load initial whitelist/blacklist
